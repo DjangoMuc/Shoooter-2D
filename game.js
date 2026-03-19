@@ -19,7 +19,7 @@ const PX = 2; // Pixel scale factor
 // --- Power-Up Definitions ---
 const POWERUP_TYPES = {
     heal: {
-        name: 'Heilung',
+        name: 'Heal',
         color: '#44dd44',
         colorDark: '#228822',
         symbol: '+',
@@ -27,36 +27,36 @@ const POWERUP_TYPES = {
         description: '+40 HP',
     },
     invincible: {
-        name: 'Schild',
+        name: 'Shield',
         color: '#ffdd00',
         colorDark: '#aa8800',
         symbol: 'S',
         duration: 5000,
-        description: '5s unverwundbar',
+        description: '5s invincible',
     },
     rapidfire: {
-        name: 'Schnellfeuer',
+        name: 'Rapid Fire',
         color: '#ff8800',
         colorDark: '#aa5500',
         symbol: 'F',
         duration: 6000,
-        description: '6s schnellere Kugeln',
+        description: '6s faster bullets',
     },
     nocooldown: {
-        name: 'Kein Cooldown',
+        name: 'No Cooldown',
         color: '#cc44ff',
         colorDark: '#7722aa',
         symbol: '!',
         duration: 4000,
-        description: '4s halber Cooldown',
+        description: '4s half cooldown',
     },
     damage: {
-        name: 'Mehr Schaden',
+        name: 'More Damage',
         color: '#ff2244',
         colorDark: '#aa1133',
         symbol: 'D',
         duration: 6000,
-        description: '6s 3x Schaden',
+        description: '6s 3x damage',
     },
 };
 const POWERUP_SPAWN_INTERVAL = 4000; // ms between spawns
@@ -1117,7 +1117,7 @@ const AI = {
 let player1, player2;
 
 function createPlayers() {
-    player1 = new Player(100, 400, '#4ecdc4', 'Spieler 1', {
+    player1 = new Player(100, 400, '#4ecdc4', 'Player 1', {
         left: 'KeyA',
         right: 'KeyD',
         jump: 'KeyW',
@@ -1126,7 +1126,7 @@ function createPlayers() {
         facingDefault: 1,
     }, sprites1);
 
-    const p2Name = gameMode === 'pve' ? 'KI' : 'Spieler 2';
+    const p2Name = gameMode === 'pve' ? 'AI' : 'Player 2';
     player2 = new Player(650, 400, '#e94560', p2Name, {
         left: 'ArrowLeft',
         right: 'ArrowRight',
@@ -1449,7 +1449,7 @@ function drawStartScreen() {
 
     // Title with shadow
     drawPixelText('SHOOOTER 2D', canvas.width / 2, 100, 44, '#e94560');
-    drawPixelText('W\u00e4hle deinen Modus!', canvas.width / 2, 140, 14, '#ffffff');
+    drawPixelText('Choose your mode!', canvas.width / 2, 140, 14, '#ffffff');
 
     // Draw mini player sprites on title screen
     drawSprite(sprites1.idle[0], 180, 180, PX, false);
@@ -1475,23 +1475,23 @@ function drawStartScreen() {
     ctx.textAlign = 'left';
 
     ctx.fillStyle = '#4ecdc4';
-    ctx.fillText('SPIELER 1', 135, 250);
+    ctx.fillText('PLAYER 1', 135, 250);
     ctx.fillStyle = '#aaa';
     ctx.font = '12px monospace';
-    ctx.fillText('Bewegen:   A / D', 135, 272);
-    ctx.fillText('Springen:  W', 135, 292);
-    ctx.fillText('Fallen:    S', 135, 312);
-    ctx.fillText('Schie\u00dfen:  Leertaste', 135, 332);
+    ctx.fillText('Move:      A / D', 135, 272);
+    ctx.fillText('Jump:      W', 135, 292);
+    ctx.fillText('Drop:      S', 135, 312);
+    ctx.fillText('Shoot:     Space', 135, 332);
 
     ctx.font = 'bold 13px monospace';
     ctx.fillStyle = '#e94560';
-    ctx.fillText('SPIELER 2', 475, 250);
+    ctx.fillText('PLAYER 2', 475, 250);
     ctx.fillStyle = '#aaa';
     ctx.font = '12px monospace';
-    ctx.fillText('Bewegen:   \u2190 / \u2192', 475, 272);
-    ctx.fillText('Springen:  \u2191', 475, 292);
-    ctx.fillText('Fallen:    \u2193', 475, 312);
-    ctx.fillText('Schie\u00dfen:  Enter', 475, 332);
+    ctx.fillText('Move:      \u2190 / \u2192', 475, 272);
+    ctx.fillText('Jump:      \u2191', 475, 292);
+    ctx.fillText('Drop:      \u2193', 475, 312);
+    ctx.fillText('Shoot:     Enter', 475, 332);
 
     // Power-Up legend
     ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
@@ -1539,7 +1539,7 @@ function drawStartScreen() {
     ctx.fillStyle = '#4ecdc4';
     ctx.fillRect(160, 424, 200, 2);
     ctx.fillRect(160, 454, 200, 2);
-    drawPixelText('1  vs Spieler', 260, 446, 14, blink ? '#4ecdc4' : '#88ffee');
+    drawPixelText('1  vs Player', 260, 446, 14, blink ? '#4ecdc4' : '#88ffee');
 
     // Mode 2: PvE
     ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
@@ -1547,7 +1547,7 @@ function drawStartScreen() {
     ctx.fillStyle = '#e94560';
     ctx.fillRect(440, 424, 200, 2);
     ctx.fillRect(440, 454, 200, 2);
-    drawPixelText('2  vs KI', 540, 446, 14, blink ? '#e94560' : '#ff8888');
+    drawPixelText('2  vs AI', 540, 446, 14, blink ? '#e94560' : '#ff8888');
 }
 
 function drawGameOverScreen() {
@@ -1555,7 +1555,7 @@ function drawGameOverScreen() {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     // Winner text with glow
-    drawPixelText(`${winner.name} gewinnt!`, canvas.width / 2, 210, 38, winner.color);
+    drawPixelText(`${winner.name} wins!`, canvas.width / 2, 210, 38, winner.color);
 
     // Trophy pixel art
     const trophyY = 240;
@@ -1569,7 +1569,7 @@ function drawGameOverScreen() {
     ctx.fillStyle = '#ffaa00';
     ctx.fillRect(canvas.width / 2 - 4, trophyY + 8, 8, 6);
 
-    drawPixelText('Dr\u00fccke R zum Neustarten', canvas.width / 2, 300, 16, '#ffffff');
+    drawPixelText('Press R to restart', canvas.width / 2, 300, 16, '#ffffff');
 }
 
 // ============================================
