@@ -95,6 +95,8 @@ const settings = {
     dropThrough: 0, // 0 = On, 1 = Off
     infiniteAmmo: 1, // 0 = On (infinite), 1 = Off (limited) - default limited
     ammoFreq: 1,     // index into AMMO_FREQ_OPTIONS (default Normal)
+    p1Skin: 0,       // index into SKIN_OPTIONS (default Cyan)
+    p2Skin: 1,       // index into SKIN_OPTIONS (default Red)
 };
 const BEST_OF_OPTIONS = [1, 3, 5];
 const MODE_OPTIONS = ['Player vs Player', 'Player vs AI'];
@@ -144,7 +146,7 @@ const TEXTS = {
         player1: 'PLAYER 1', player2: 'PLAYER 2',
         move: 'Move:', jump: 'Jump:', drop: 'Drop:', shoot: 'Shoot:',
         settings: 'SETTINGS', system: 'SYSTEM', gameplay: 'GAMEPLAY',
-        sysDesc: 'Map, Background, Sound, Controls',
+        sysDesc: 'Map, Background, Sound, Colors...',
         gpDesc: 'Mode, HP, Gravity, Sudden Death...',
         selectCat: 'Select a category  |  F to start game  |  ESC back',
         pressH: 'Press H for How to Play',
@@ -156,6 +158,7 @@ const TEXTS = {
         lblPuFreq: 'PU SPAWN FREQ', lblAiDiff: 'AI DIFFICULTY', lblGravity: 'GRAVITY',
         lblSuddenDeath: 'SUDDEN DEATH', lblDropThrough: 'DROP-THROUGH', lblInfAmmo: 'INFINITE AMMO',
         lblAmmoFreq: 'AMMO SPAWN FREQ',
+        lblP1Skin: 'P1 COLOR', lblP2Skin: 'P2 COLOR',
         bestOf: 'Best of ',
         slow: 'Slow', fast: 'Fast', veryFast: 'Very Fast',
         on: 'On', off: 'Off',
@@ -204,7 +207,7 @@ const TEXTS = {
         player1: 'SPIELER 1', player2: 'SPIELER 2',
         move: 'Bewegen:', jump: 'Springen:', drop: 'Fallen:', shoot: 'Schie\u00dfen:',
         settings: 'EINSTELLUNGEN', system: 'SYSTEM', gameplay: 'GAMEPLAY',
-        sysDesc: 'Karte, Hintergrund, Ton, Steuerung',
+        sysDesc: 'Karte, Hintergrund, Ton, Farben...',
         gpDesc: 'Modus, HP, Gravitation, Pl\u00f6tzl. Tod...',
         selectCat: 'Kategorie w\u00e4hlen  |  F = Spiel starten  |  ESC zur\u00fcck',
         pressH: 'H f\u00fcr Spielanleitung',
@@ -216,6 +219,7 @@ const TEXTS = {
         lblPuFreq: 'PU SPAWN H\u00c4UFIGK.', lblAiDiff: 'KI SCHWIERIGKEIT', lblGravity: 'GRAVITATION',
         lblSuddenDeath: 'PL\u00d6TZL. TOD', lblDropThrough: 'DURCHFALLEN', lblInfAmmo: 'UNENDL. MUNITION',
         lblAmmoFreq: 'MUNI. SPAWN H\u00c4UFIGK.',
+        lblP1Skin: 'S1 FARBE', lblP2Skin: 'S2 FARBE',
         bestOf: 'Best of ',
         slow: 'Langsam', fast: 'Schnell', veryFast: 'Sehr schnell',
         on: 'An', off: 'Aus',
@@ -441,8 +445,8 @@ window.addEventListener('keydown', (e) => {
                 gameState = 'start';
             }
         } else if (settingsCategory === 0) {
-            // System settings: Map, Background, Sound, Language, Controls
-            const sysCount = 5;
+            // System settings: Map, Background, Sound, Language, P1 Color, P2 Color, Controls
+            const sysCount = 7;
             if (e.code === 'ArrowUp' || e.code === 'KeyW') {
                 settingsCursor = (settingsCursor - 1 + sysCount) % sysCount;
             }
@@ -454,6 +458,8 @@ window.addEventListener('keydown', (e) => {
                 if (settingsCursor === 1) { settings.bg = (settings.bg - 1 + BG_THEMES.length) % BG_THEMES.length; prerenderBackground(); }
                 if (settingsCursor === 2) settings.sound = (settings.sound - 1 + SOUND_OPTIONS.length) % SOUND_OPTIONS.length;
                 if (settingsCursor === 3) settings.lang = (settings.lang - 1 + LANG_OPTIONS.length) % LANG_OPTIONS.length;
+                if (settingsCursor === 4) { settings.p1Skin = (settings.p1Skin - 1 + SKIN_OPTIONS.length) % SKIN_OPTIONS.length; updateSkins(); }
+                if (settingsCursor === 5) { settings.p2Skin = (settings.p2Skin - 1 + SKIN_OPTIONS.length) % SKIN_OPTIONS.length; updateSkins(); }
                 saveSettings();
             }
             if (e.code === 'ArrowRight' || e.code === 'KeyD') {
@@ -461,10 +467,12 @@ window.addEventListener('keydown', (e) => {
                 if (settingsCursor === 1) { settings.bg = (settings.bg + 1) % BG_THEMES.length; prerenderBackground(); }
                 if (settingsCursor === 2) settings.sound = (settings.sound + 1) % SOUND_OPTIONS.length;
                 if (settingsCursor === 3) settings.lang = (settings.lang + 1) % LANG_OPTIONS.length;
+                if (settingsCursor === 4) { settings.p1Skin = (settings.p1Skin + 1) % SKIN_OPTIONS.length; updateSkins(); }
+                if (settingsCursor === 5) { settings.p2Skin = (settings.p2Skin + 1) % SKIN_OPTIONS.length; updateSkins(); }
                 saveSettings();
             }
             if (e.code === 'Enter' || e.code === 'Space') {
-                if (settingsCursor === 4) {
+                if (settingsCursor === 6) {
                     gameState = 'rebind';
                     rebindPlayer = 1;
                     rebindCursor = 0;
@@ -652,39 +660,53 @@ function drawSprite(sprite, x, y, scale, flipX) {
 // Color aliases for sprite readability
 const _ = null; // transparent
 
-// --- PLAYER 1 SPRITES (Cyan/Teal Ranger) ---
-const P1 = {
-    h: '#2d8a80', // hair/helmet dark
-    H: '#4ecdc4', // helmet bright
-    S: '#3aafa9', // suit
-    s: '#2b7a78', // suit shadow
-    F: '#f5cba7', // face/skin
-    f: '#e0ac7e', // skin shadow
-    E: '#ffffff', // eye white
-    e: '#1a1a2e', // eye pupil
-    B: '#555555', // boots
-    b: '#444444', // boots shadow
-    G: '#888888', // gun
-    g: '#666666', // gun dark
-    V: '#3aafa9', // visor
-};
+// --- PLAYER SKIN / COLOR PALETTES ---
+const SKIN_OPTIONS = [
+    {
+        name: 'Cyan', nameDE: 'Cyan', primary: '#4ecdc4',
+        palette: { h: '#2d8a80', H: '#4ecdc4', S: '#3aafa9', s: '#2b7a78', F: '#f5cba7', f: '#e0ac7e', E: '#ffffff', e: '#1a1a2e', B: '#555555', b: '#444444', G: '#888888', g: '#666666', V: '#3aafa9' },
+    },
+    {
+        name: 'Red', nameDE: 'Rot', primary: '#e94560',
+        palette: { h: '#a82040', H: '#e94560', S: '#d63851', s: '#a82040', F: '#f5cba7', f: '#e0ac7e', E: '#ffffff', e: '#1a1a2e', B: '#555555', b: '#444444', G: '#888888', g: '#666666', V: '#d63851' },
+    },
+    {
+        name: 'Green', nameDE: 'Grün', primary: '#44cc44',
+        palette: { h: '#1a7a1a', H: '#44cc44', S: '#33aa33', s: '#228822', F: '#f5cba7', f: '#e0ac7e', E: '#ffffff', e: '#1a1a2e', B: '#555555', b: '#444444', G: '#888888', g: '#666666', V: '#33aa33' },
+    },
+    {
+        name: 'Purple', nameDE: 'Lila', primary: '#aa55ee',
+        palette: { h: '#6622aa', H: '#aa55ee', S: '#9944dd', s: '#7733bb', F: '#f5cba7', f: '#e0ac7e', E: '#ffffff', e: '#1a1a2e', B: '#555555', b: '#444444', G: '#888888', g: '#666666', V: '#9944dd' },
+    },
+    {
+        name: 'Orange', nameDE: 'Orange', primary: '#ff8833',
+        palette: { h: '#bb5511', H: '#ff8833', S: '#ee7722', s: '#cc6611', F: '#f5cba7', f: '#e0ac7e', E: '#ffffff', e: '#1a1a2e', B: '#555555', b: '#444444', G: '#888888', g: '#666666', V: '#ee7722' },
+    },
+    {
+        name: 'Blue', nameDE: 'Blau', primary: '#4488ff',
+        palette: { h: '#2255aa', H: '#4488ff', S: '#3377ee', s: '#2266cc', F: '#f5cba7', f: '#e0ac7e', E: '#ffffff', e: '#1a1a2e', B: '#555555', b: '#444444', G: '#888888', g: '#666666', V: '#3377ee' },
+    },
+    {
+        name: 'Yellow', nameDE: 'Gelb', primary: '#ffdd00',
+        palette: { h: '#aa9400', H: '#ffdd00', S: '#eebb00', s: '#ccaa00', F: '#f5cba7', f: '#e0ac7e', E: '#ffffff', e: '#1a1a2e', B: '#555555', b: '#444444', G: '#888888', g: '#666666', V: '#eebb00' },
+    },
+    {
+        name: 'Pink', nameDE: 'Pink', primary: '#ff66aa',
+        palette: { h: '#cc3377', H: '#ff66aa', S: '#ee5599', s: '#cc3377', F: '#f5cba7', f: '#e0ac7e', E: '#ffffff', e: '#1a1a2e', B: '#555555', b: '#444444', G: '#888888', g: '#666666', V: '#ee5599' },
+    },
+    {
+        name: 'White', nameDE: 'Weiß', primary: '#eeeeee',
+        palette: { h: '#999999', H: '#eeeeee', S: '#cccccc', s: '#aaaaaa', F: '#f5cba7', f: '#e0ac7e', E: '#ffffff', e: '#1a1a2e', B: '#555555', b: '#444444', G: '#888888', g: '#666666', V: '#cccccc' },
+    },
+    {
+        name: 'Black', nameDE: 'Schwarz', primary: '#444444',
+        palette: { h: '#111111', H: '#444444', S: '#333333', s: '#222222', F: '#f5cba7', f: '#e0ac7e', E: '#ffffff', e: '#1a1a2e', B: '#333333', b: '#222222', G: '#666666', g: '#555555', V: '#333333' },
+    },
+];
 
-// --- PLAYER 2 SPRITES (Red Ranger) ---
-const P2 = {
-    h: '#a82040', // hair/helmet dark
-    H: '#e94560', // helmet bright
-    S: '#d63851', // suit
-    s: '#a82040', // suit shadow
-    F: '#f5cba7', // face/skin
-    f: '#e0ac7e', // skin shadow
-    E: '#ffffff', // eye white
-    e: '#1a1a2e', // eye pupil
-    B: '#555555', // boots
-    b: '#444444', // boots shadow
-    G: '#888888', // gun
-    g: '#666666', // gun dark
-    V: '#d63851', // visor
-};
+// Current palette references (updated when skin changes)
+let P1 = SKIN_OPTIONS[settings.p1Skin || 0].palette;
+let P2 = SKIN_OPTIONS[settings.p2Skin || 1].palette;
 
 function makeSprites(C) {
     // Idle frame 1 (16 wide x 20 tall)
@@ -794,8 +816,16 @@ function makeSprites(C) {
     return { idle: [idle1], walk: [walk1, walk2], jump: [jump], gun };
 }
 
-const sprites1 = makeSprites(P1);
-const sprites2 = makeSprites(P2);
+let sprites1 = makeSprites(P1);
+let sprites2 = makeSprites(P2);
+
+// Regenerate sprites when skin/palette changes
+function updateSkins() {
+    P1 = SKIN_OPTIONS[settings.p1Skin].palette;
+    P2 = SKIN_OPTIONS[settings.p2Skin].palette;
+    sprites1 = makeSprites(P1);
+    sprites2 = makeSprites(P2);
+}
 
 // ============================================
 // PLATFORM SPRITES
@@ -1827,7 +1857,9 @@ const AI = {
 let player1, player2;
 
 function createPlayers() {
-    player1 = new Player(100, 400, '#4ecdc4', 'Player 1', {
+    updateSkins(); // Ensure sprites match current skin settings
+    const p1Color = SKIN_OPTIONS[settings.p1Skin].primary;
+    player1 = new Player(100, 400, p1Color, 'Player 1', {
         left: customBindings.p1.left,
         right: customBindings.p1.right,
         jump: customBindings.p1.jump,
@@ -1837,7 +1869,8 @@ function createPlayers() {
     }, sprites1);
 
     const p2Name = gameMode === 'pve' ? 'AI' : 'Player 2';
-    player2 = new Player(650, 400, '#e94560', p2Name, {
+    const p2Color = SKIN_OPTIONS[settings.p2Skin].primary;
+    player2 = new Player(650, 400, p2Color, p2Name, {
         left: customBindings.p2.left,
         right: customBindings.p2.right,
         jump: customBindings.p2.jump,
@@ -2063,7 +2096,7 @@ function checkBulletHits() {
             player2.takeDamage(p1Damage);
             stats.p1.hits++;
             stats.p1.damageDone += p1Damage;
-            spawnParticles(b.x, b.y, '#e94560', 10);
+            spawnParticles(b.x, b.y, player2.color, 10);
             spawnParticles(b.x, b.y, '#ff8888', 5);
             player1.bullets.splice(i, 1);
         }
@@ -2080,7 +2113,7 @@ function checkBulletHits() {
             player1.takeDamage(p2Damage);
             stats.p2.hits++;
             stats.p2.damageDone += p2Damage;
-            spawnParticles(b.x, b.y, '#4ecdc4', 10);
+            spawnParticles(b.x, b.y, player1.color, 10);
             spawnParticles(b.x, b.y, '#88ffee', 5);
             player2.bullets.splice(i, 1);
         }
@@ -2372,15 +2405,18 @@ function drawStartScreen() {
     drawSprite(sprites2.gun, 570 - 10, 196 - idleBob, PX, true);
 
     // Controls boxes
+    const p1SkinColor = SKIN_OPTIONS[settings.p1Skin].primary;
+    const p2SkinColor = SKIN_OPTIONS[settings.p2Skin].primary;
+
     ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
     ctx.fillRect(120, 230, 220, 118);
     ctx.fillRect(460, 230, 220, 118);
 
     // Pixel borders
-    ctx.fillStyle = '#4ecdc4';
+    ctx.fillStyle = p1SkinColor;
     ctx.fillRect(120, 230, 220, 2);
     ctx.fillRect(120, 346, 220, 2);
-    ctx.fillStyle = '#e94560';
+    ctx.fillStyle = p2SkinColor;
     ctx.fillRect(460, 230, 220, 2);
     ctx.fillRect(460, 346, 220, 2);
 
@@ -2391,7 +2427,7 @@ function drawStartScreen() {
     const b2 = customBindings.p2;
     const K = getKeyDisplayName;
 
-    ctx.fillStyle = '#4ecdc4';
+    ctx.fillStyle = p1SkinColor;
     ctx.fillText(T('player1'), 135, 250);
     ctx.fillStyle = '#aaa';
     ctx.font = '12px monospace';
@@ -2401,7 +2437,7 @@ function drawStartScreen() {
     ctx.fillText(T('shoot') + '     ' + K(b1.shoot), 135, 332);
 
     ctx.font = 'bold 13px monospace';
-    ctx.fillStyle = '#e94560';
+    ctx.fillStyle = p2SkinColor;
     ctx.fillText(T('player2'), 475, 250);
     ctx.fillStyle = '#aaa';
     ctx.font = '12px monospace';
@@ -2517,29 +2553,60 @@ function drawSettingsScreen() {
         drawPixelText(T('system'), canvas.width / 2, 60, 28, '#4ecdc4');
 
         const soundVal = settings.sound === 0 ? T('on') : T('off');
+        const skinLang = settings.lang === 0 ? 'name' : 'nameDE';
+        const p1SkinName = SKIN_OPTIONS[settings.p1Skin][skinLang];
+        const p2SkinName = SKIN_OPTIONS[settings.p2Skin][skinLang];
         const options = [
             { label: T('lblMap'), value: MAPS[MAP_KEYS[settings.map]].name, hasArrows: true },
             { label: T('lblBg'), value: BG_THEMES[settings.bg].name, hasArrows: true },
             { label: T('lblSound'), value: soundVal, hasArrows: true },
             { label: T('lblLang'), value: LANG_OPTIONS[settings.lang], hasArrows: true },
+            { label: T('lblP1Skin'), value: p1SkinName, hasArrows: true },
+            { label: T('lblP2Skin'), value: p2SkinName, hasArrows: true },
             { label: T('lblControls'), value: T('pressEnterEdit'), hasArrows: false },
         ];
 
-        drawSettingsOptions(options, 90);
+        drawSettingsOptions(options, 78);
+
+        // Skin color preview swatches next to P1/P2 COLOR options
+        const spacing = options.length > 9 ? 40 : (options.length > 7 ? 44 : (options.length > 5 ? 48 : 52));
+        const boxH = options.length > 9 ? 30 : (options.length > 7 ? 34 : (options.length > 5 ? 36 : 40));
+        for (let si = 4; si <= 5; si++) {
+            const skinIdx = si === 4 ? settings.p1Skin : settings.p2Skin;
+            const skin = SKIN_OPTIONS[skinIdx];
+            const sy = 78 + si * spacing;
+            const swX = 560;
+            const swS = boxH - 8;
+            // Color swatch
+            ctx.fillStyle = skin.primary;
+            ctx.fillRect(swX, sy + 4, swS, swS);
+            ctx.fillStyle = '#000';
+            ctx.fillRect(swX, sy + 4, swS, 2);
+            ctx.fillRect(swX, sy + 4 + swS - 2, swS, 2);
+            ctx.fillRect(swX, sy + 4, 2, swS);
+            ctx.fillRect(swX + swS - 2, sy + 4, 2, swS);
+            // Mini sprite preview
+            const previewSprites = si === 4 ? sprites1 : sprites2;
+            const previewFrame = previewSprites.idle[0];
+            const miniScale = 1;
+            const sprX = swX + swS + 8;
+            const sprY = sy + 2;
+            drawSprite(previewFrame, sprX, sprY, miniScale, false);
+        }
 
         // Map preview
-        const previewY = 340;
+        const previewY = 78 + 7 * spacing + 8;
         ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-        ctx.fillRect(150, previewY, 500, 55);
+        ctx.fillRect(150, previewY, 500, 50);
         ctx.fillStyle = '#444';
         ctx.fillRect(150, previewY, 500, 2);
-        ctx.fillRect(150, previewY + 53, 500, 2);
-        drawPixelText(T('mapPreview'), canvas.width / 2, previewY + 13, 10, '#888');
+        ctx.fillRect(150, previewY + 48, 500, 2);
+        drawPixelText(T('mapPreview'), canvas.width / 2, previewY + 11, 9, '#888');
 
         const previewMap = MAPS[MAP_KEYS[settings.map]].platforms;
-        const scale = 0.1;
-        const offsetX = 200;
-        const offsetY = previewY - 25;
+        const scale = 0.09;
+        const offsetX = 210;
+        const offsetY = previewY - 22;
         for (const p of previewMap) {
             ctx.fillStyle = p.isGround ? '#8b6914' : '#7755aa';
             ctx.fillRect(offsetX + p.x * scale, offsetY + p.y * scale, Math.max(p.w * scale, 4), Math.max(p.h * scale, 2));
@@ -2551,17 +2618,17 @@ function drawSettingsScreen() {
         const swatchW = 100;
         for (let i = 0; i < theme.sky.length; i++) {
             ctx.fillStyle = theme.sky[i];
-            ctx.fillRect(swatchX, previewY + 5 + i * 9, swatchW, 9);
+            ctx.fillRect(swatchX, previewY + 4 + i * 8, swatchW, 8);
         }
         ctx.fillStyle = '#444';
-        ctx.fillRect(swatchX, previewY + 3, swatchW, 2);
-        ctx.fillRect(swatchX, previewY + 50, swatchW, 2);
-        ctx.fillRect(swatchX, previewY + 3, 2, 49);
-        ctx.fillRect(swatchX + swatchW - 2, previewY + 3, 2, 49);
+        ctx.fillRect(swatchX, previewY + 2, swatchW, 2);
+        ctx.fillRect(swatchX, previewY + 44, swatchW, 2);
+        ctx.fillRect(swatchX, previewY + 2, 2, 44);
+        ctx.fillRect(swatchX + swatchW - 2, previewY + 2, 2, 44);
 
         const blink = Math.floor(Date.now() / 500) % 2;
-        drawPixelText(T('arrowChange'), canvas.width / 2, 430, 10, blink ? '#aaa' : '#666');
-        drawPixelText(T('pressH'), canvas.width / 2, 450, 10, '#4ecdc4');
+        drawPixelText(T('arrowChange'), canvas.width / 2, 480, 9, blink ? '#aaa' : '#666');
+        drawPixelText(T('pressH'), canvas.width / 2, 496, 9, '#4ecdc4');
 
     } else if (settingsCategory === 1) {
         // --- Gameplay Settings ---
@@ -2649,20 +2716,22 @@ function drawRebindScreen() {
     const tab2Selected = rebindPlayer === 2;
 
     // Player 1 tab
+    const p1C = SKIN_OPTIONS[settings.p1Skin].primary;
+    const p2C = SKIN_OPTIONS[settings.p2Skin].primary;
     ctx.fillStyle = tab1Selected ? 'rgba(78, 205, 196, 0.2)' : 'rgba(0, 0, 0, 0.4)';
     ctx.fillRect(150, 80, 240, 34);
-    ctx.fillStyle = tab1Selected ? '#4ecdc4' : '#555';
+    ctx.fillStyle = tab1Selected ? p1C : '#555';
     ctx.fillRect(150, 80, 240, 2);
     ctx.fillRect(150, 112, 240, 2);
-    drawPixelText(T('p1Label'), 270, 102, 14, tab1Selected ? '#4ecdc4' : '#666');
+    drawPixelText(T('p1Label'), 270, 102, 14, tab1Selected ? p1C : '#666');
 
     // Player 2 tab
     ctx.fillStyle = tab2Selected ? 'rgba(233, 69, 96, 0.2)' : 'rgba(0, 0, 0, 0.4)';
     ctx.fillRect(410, 80, 240, 34);
-    ctx.fillStyle = tab2Selected ? '#e94560' : '#555';
+    ctx.fillStyle = tab2Selected ? p2C : '#555';
     ctx.fillRect(410, 80, 240, 2);
     ctx.fillRect(410, 112, 240, 2);
-    drawPixelText(T('p2Label'), 530, 102, 14, tab2Selected ? '#e94560' : '#666');
+    drawPixelText(T('p2Label'), 530, 102, 14, tab2Selected ? p2C : '#666');
 
     // Arrow hints between tabs
     const arrowBlink = Math.floor(Date.now() / 400) % 2;
@@ -2670,7 +2739,7 @@ function drawRebindScreen() {
 
     // Key bindings list
     const pKey = rebindPlayer === 1 ? 'p1' : 'p2';
-    const playerColor = rebindPlayer === 1 ? '#4ecdc4' : '#e94560';
+    const playerColor = rebindPlayer === 1 ? p1C : p2C;
 
     ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
     ctx.fillRect(150, 125, 500, KEY_ACTIONS.length * 52 + 10);
