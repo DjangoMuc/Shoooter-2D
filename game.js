@@ -63,7 +63,7 @@ const POWERUP_SPAWN_INTERVAL = 4000; // ms between spawns
 const POWERUP_SIZE = 18;
 
 // --- Game State ---
-let gameState = 'start'; // 'start', 'playing', 'dying', 'gameover'
+let gameState = 'start'; // 'start', 'settings', 'playing', 'dying', 'roundover', 'gameover'
 let gameMode = null; // 'pvp' or 'pve'
 let winner = null;
 let loser = null;
@@ -74,6 +74,317 @@ let damageNumbers = [];
 let frameCount = 0;
 let powerups = [];
 let lastPowerupSpawn = 0;
+let roundStartTime = 0;
+let suddenDeathActive = false;
+let ammoPickups = [];
+let lastAmmoSpawn = 0;
+
+// --- Settings ---
+const settings = {
+    map: 0,       // index into MAP_KEYS
+    mode: 0,      // 0 = PvP, 1 = PvE
+    bestOf: 0,    // 0 = Bo1, 1 = Bo3, 2 = Bo5
+    bg: 0,        // index into BG_THEMES
+    sound: 0,     // 0 = On, 1 = Off
+    lang: 0,      // 0 = English, 1 = Deutsch
+    hp: 1,        // index into HP_OPTIONS (default 100)
+    puFreq: 1,    // index into PU_FREQ_OPTIONS (default Normal)
+    aiDiff: 1,    // index into AI_DIFF_OPTIONS (default Medium)
+    gravity: 1,   // index into GRAVITY_OPTIONS (default Normal)
+    suddenDeath: 0, // index into SUDDEN_DEATH_OPTIONS (default Off)
+    dropThrough: 0, // 0 = On, 1 = Off
+    infiniteAmmo: 1, // 0 = On (infinite), 1 = Off (limited) - default limited
+    ammoFreq: 1,     // index into AMMO_FREQ_OPTIONS (default Normal)
+};
+const BEST_OF_OPTIONS = [1, 3, 5];
+const MODE_OPTIONS = ['Player vs Player', 'Player vs AI'];
+const HP_OPTIONS = [50, 100, 150, 200];
+const PU_FREQ_OPTIONS = [
+    { name: 'Off', interval: Infinity },
+    { name: 'Normal', interval: 4000 },
+    { name: 'Frequent', interval: 2000 },
+    { name: 'Chaos', interval: 800 },
+];
+const AI_DIFF_OPTIONS = [
+    { name: 'Easy', thinkInterval: 12, cooldown: 700, accuracy: 0.5 },
+    { name: 'Medium', thinkInterval: 8, cooldown: 500, accuracy: 0.7 },
+    { name: 'Hard', thinkInterval: 4, cooldown: 350, accuracy: 0.9 },
+];
+const SOUND_OPTIONS = ['On', 'Off'];
+const GRAVITY_OPTIONS = [
+    { name: 'Moon', value: 0.3 },
+    { name: 'Normal', value: 0.6 },
+    { name: 'Heavy', value: 0.9 },
+];
+const SUDDEN_DEATH_OPTIONS = [
+    { name: 'Off', time: 0 },
+    { name: 'After 30s', time: 30 },
+    { name: 'After 60s', time: 60 },
+    { name: 'After 90s', time: 90 },
+];
+const DROP_THROUGH_OPTIONS = ['On', 'Off'];
+const INFINITE_AMMO_OPTIONS = ['On', 'Off'];
+const START_AMMO = 0;
+const AMMO_PICKUP_AMOUNT = 5;
+const AMMO_SPAWN_INTERVAL = 5000; // ms (default, overridden by setting)
+const AMMO_FREQ_OPTIONS = [
+    { name: 'Slow', interval: 8000 },
+    { name: 'Normal', interval: 5000 },
+    { name: 'Fast', interval: 3000 },
+    { name: 'Very Fast', interval: 1500 },
+];
+const LANG_OPTIONS = ['English', 'Deutsch'];
+
+// --- Translations ---
+const TEXTS = {
+    en: {
+        subtitle: 'Local 2D Pixel Shooter',
+        pressEnter: 'Press ENTER to start',
+        pressSpace: 'Press SPACE for settings',
+        player1: 'PLAYER 1', player2: 'PLAYER 2',
+        move: 'Move:', jump: 'Jump:', drop: 'Drop:', shoot: 'Shoot:',
+        settings: 'SETTINGS', system: 'SYSTEM', gameplay: 'GAMEPLAY',
+        sysDesc: 'Map, Background, Sound, Controls',
+        gpDesc: 'Mode, HP, Gravity, Sudden Death...',
+        selectCat: 'Select a category  |  F to start game  |  ESC back',
+        pressH: 'Press H for How to Play',
+        arrowChange: '\u2190 \u2192 to change  |  F to start game  |  ESC back',
+        mapPreview: 'Map Preview',
+        pressEnterEdit: 'Press ENTER to edit',
+        lblMap: 'MAP', lblBg: 'BACKGROUND', lblSound: 'SOUND', lblLang: 'LANGUAGE',
+        lblControls: 'CONTROLS', lblMode: 'MODE', lblRounds: 'ROUNDS', lblMaxHp: 'MAX HP',
+        lblPuFreq: 'PU SPAWN FREQ', lblAiDiff: 'AI DIFFICULTY', lblGravity: 'GRAVITY',
+        lblSuddenDeath: 'SUDDEN DEATH', lblDropThrough: 'DROP-THROUGH', lblInfAmmo: 'INFINITE AMMO',
+        lblAmmoFreq: 'AMMO SPAWN FREQ',
+        bestOf: 'Best of ',
+        slow: 'Slow', fast: 'Fast', veryFast: 'Very Fast',
+        on: 'On', off: 'Off',
+        pvp: 'Player vs Player', pve: 'Player vs AI',
+        easy: 'Easy', medium: 'Medium', hard: 'Hard',
+        moon: 'Moon', normal: 'Normal', heavy: 'Heavy',
+        frequent: 'Frequent', chaos: 'Chaos',
+        after30: 'After 30s', after60: 'After 60s', after90: 'After 90s',
+        keyBindings: 'KEY BINDINGS',
+        alreadyUsed: 'already used!', tryAnother: 'Try another key...',
+        pressKey: 'Press a key...', enterChange: 'ENTER to change',
+        rebindHint: '\u2190/\u2192 switch player  |  \u2191/\u2193 select action  |  ENTER to rebind  |  ESC back',
+        moveLeft: 'Move Left', moveRight: 'Move Right',
+        howToPlay: 'HOW TO PLAY',
+        goalTitle: 'GOAL',
+        goal1: 'Defeat your opponent by reducing their HP to 0.',
+        goal2: 'In Best of 3/5, win enough rounds to take the match!',
+        goal3: 'In Best of 1, a single round decides the winner.',
+        controlsTitle: 'CONTROLS',
+        controlsDefault: '(default - can be changed in settings)',
+        p1Label: 'Player 1:', p2Label: 'Player 2:',
+        p1Controls: 'A/D Move  W Jump  S Drop  Space Shoot',
+        p2Controls: '\u2190/\u2192 Move  \u2191 Jump  \u2193 Drop  Enter Shoot',
+        escMenu: 'ESC = Return to menu at any time',
+        mechTitle: 'MECHANICS',
+        mech1: '\u2022 Each player starts with configurable HP. Shots deal 10 damage.',
+        mech2: '\u2022 Jump on platforms and drop through them (press down).',
+        mech3: '\u2022 Power-ups spawn randomly. Walk over them to collect!',
+        mech4: '\u2022 Limited ammo mode: start with 0 shots, collect ammo pickups',
+        mech5: '  (blue "A" boxes) for +5 ammo. Ammo count shown next to HP bar.',
+        puTitle: 'POWER-UPS',
+        closeHint: 'Press H or ESC to close',
+        winsMatch: 'wins the match!', winsRound: 'wins the round!',
+        score: 'Score:', roundStats: 'ROUND STATS',
+        shotsFired: 'Shots Fired', hits: 'Hits', accuracy: 'Accuracy',
+        damageDone: 'Damage Done', puCollected: 'Power-Ups collected',
+        pressRMenu: 'Press R to return to menu',
+        pressRNext: 'Press R for next round',
+        suddenDeath: 'SUDDEN DEATH',
+        blocked: 'BLOCKED',
+    },
+    de: {
+        subtitle: 'Lokaler 2D Pixel Shooter',
+        pressEnter: 'ENTER zum Starten',
+        pressSpace: 'LEERTASTE f\u00fcr Einstellungen',
+        player1: 'SPIELER 1', player2: 'SPIELER 2',
+        move: 'Bewegen:', jump: 'Springen:', drop: 'Fallen:', shoot: 'Schie\u00dfen:',
+        settings: 'EINSTELLUNGEN', system: 'SYSTEM', gameplay: 'GAMEPLAY',
+        sysDesc: 'Karte, Hintergrund, Ton, Steuerung',
+        gpDesc: 'Modus, HP, Gravitation, Pl\u00f6tzl. Tod...',
+        selectCat: 'Kategorie w\u00e4hlen  |  F = Spiel starten  |  ESC zur\u00fcck',
+        pressH: 'H f\u00fcr Spielanleitung',
+        arrowChange: '\u2190 \u2192 \u00e4ndern  |  F = Spiel starten  |  ESC zur\u00fcck',
+        mapPreview: 'Kartenvorschau',
+        pressEnterEdit: 'ENTER zum Bearbeiten',
+        lblMap: 'KARTE', lblBg: 'HINTERGRUND', lblSound: 'TON', lblLang: 'SPRACHE',
+        lblControls: 'STEUERUNG', lblMode: 'MODUS', lblRounds: 'RUNDEN', lblMaxHp: 'MAX HP',
+        lblPuFreq: 'PU SPAWN H\u00c4UFIGK.', lblAiDiff: 'KI SCHWIERIGKEIT', lblGravity: 'GRAVITATION',
+        lblSuddenDeath: 'PL\u00d6TZL. TOD', lblDropThrough: 'DURCHFALLEN', lblInfAmmo: 'UNENDL. MUNITION',
+        lblAmmoFreq: 'MUNI. SPAWN H\u00c4UFIGK.',
+        bestOf: 'Best of ',
+        slow: 'Langsam', fast: 'Schnell', veryFast: 'Sehr schnell',
+        on: 'An', off: 'Aus',
+        pvp: 'Spieler vs Spieler', pve: 'Spieler vs KI',
+        easy: 'Leicht', medium: 'Mittel', hard: 'Schwer',
+        moon: 'Mond', normal: 'Normal', heavy: 'Schwer',
+        frequent: 'H\u00e4ufig', chaos: 'Chaos',
+        after30: 'Nach 30s', after60: 'Nach 60s', after90: 'Nach 90s',
+        keyBindings: 'TASTENBELEGUNG',
+        alreadyUsed: 'bereits belegt!', tryAnother: 'Andere Taste w\u00e4hlen...',
+        pressKey: 'Taste dr\u00fccken...', enterChange: 'ENTER zum \u00c4ndern',
+        rebindHint: '\u2190/\u2192 Spieler  |  \u2191/\u2193 Aktion  |  ENTER = \u00e4ndern  |  ESC zur\u00fcck',
+        moveLeft: 'Links', moveRight: 'Rechts',
+        howToPlay: 'SPIELANLEITUNG',
+        goalTitle: 'ZIEL',
+        goal1: 'Besiege deinen Gegner, indem du seine HP auf 0 reduzierst.',
+        goal2: 'Bei Best of 3/5 gewinne genug Runden f\u00fcr den Sieg!',
+        goal3: 'Bei Best of 1 entscheidet eine einzige Runde.',
+        controlsTitle: 'STEUERUNG',
+        controlsDefault: '(Standard - in Einstellungen \u00e4nderbar)',
+        p1Label: 'Spieler 1:', p2Label: 'Spieler 2:',
+        p1Controls: 'A/D Bewegen  W Springen  S Fallen  Leertaste Schie\u00dfen',
+        p2Controls: '\u2190/\u2192 Bewegen  \u2191 Springen  \u2193 Fallen  Enter Schie\u00dfen',
+        escMenu: 'ESC = Zur\u00fcck zum Men\u00fc',
+        mechTitle: 'MECHANIKEN',
+        mech1: '\u2022 Jeder Spieler startet mit einstellbaren HP. Sch\u00fcsse machen 10 Schaden.',
+        mech2: '\u2022 Springe auf Plattformen und falle durch sie hindurch (Runter-Taste).',
+        mech3: '\u2022 Power-Ups erscheinen zuf\u00e4llig. Laufe dr\u00fcber zum Einsammeln!',
+        mech4: '\u2022 Begrenzte Munition: Starte mit 0 Schuss, sammle Munitions-Pickups',
+        mech5: '  (blaue "A" Boxen) f\u00fcr +5 Munition. Anzeige neben der HP-Leiste.',
+        puTitle: 'POWER-UPS',
+        closeHint: 'H oder ESC zum Schlie\u00dfen',
+        winsMatch: 'gewinnt das Match!', winsRound: 'gewinnt die Runde!',
+        score: 'Punkte:', roundStats: 'RUNDENSTATISTIK',
+        shotsFired: 'Sch\u00fcsse', hits: 'Treffer', accuracy: 'Genauigkeit',
+        damageDone: 'Schaden', puCollected: 'Power-Ups gesammelt',
+        pressRMenu: 'R = Zur\u00fcck zum Men\u00fc',
+        pressRNext: 'R = N\u00e4chste Runde',
+        suddenDeath: 'PL\u00d6TZLICHER TOD',
+        blocked: 'GEBLOCKT',
+    },
+};
+
+function T(key) {
+    const lang = settings.lang === 0 ? 'en' : 'de';
+    return TEXTS[lang][key] || TEXTS.en[key] || key;
+}
+
+// --- Settings Persistence (localStorage) ---
+const SETTINGS_KEY = 'shoooter2d_settings';
+
+function saveSettings() {
+    try {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    } catch (e) { /* ignore storage errors */ }
+}
+
+function loadSettings() {
+    try {
+        const saved = localStorage.getItem(SETTINGS_KEY);
+        if (saved) {
+            const parsed = JSON.parse(saved);
+            for (const key in parsed) {
+                if (key in settings) settings[key] = parsed[key];
+            }
+        }
+    } catch (e) { /* ignore parse errors, use defaults */ }
+}
+
+const BINDINGS_KEY = 'shoooter2d_bindings';
+
+function saveBindings() {
+    try {
+        localStorage.setItem(BINDINGS_KEY, JSON.stringify(customBindings));
+    } catch (e) { /* ignore storage errors */ }
+}
+
+function loadBindings() {
+    try {
+        const saved = localStorage.getItem(BINDINGS_KEY);
+        if (saved) {
+            const parsed = JSON.parse(saved);
+            if (parsed.p1) for (const key in parsed.p1) { if (key in customBindings.p1) customBindings.p1[key] = parsed.p1[key]; }
+            if (parsed.p2) for (const key in parsed.p2) { if (key in customBindings.p2) customBindings.p2[key] = parsed.p2[key]; }
+        }
+    } catch (e) { /* ignore parse errors, use defaults */ }
+}
+
+loadSettings();
+
+// Settings menu state
+let settingsCategory = -1; // -1 = category select, 0 = system, 1 = gameplay
+let settingsCursor = 0;
+const BG_THEMES = [
+    {
+        name: 'Night City',
+        sky: ['#0a0a1a', '#0f1128', '#141836', '#16213e', '#1a2744'],
+        buildingColor: '#0d1525',
+        windowColors: ['#2a3a5e', '#1a2744'],
+        starColor: '#ffffff',
+    },
+    {
+        name: 'Sunset',
+        sky: ['#1a0a2e', '#2d1b4e', '#5e2d53', '#b85450', '#e8844a'],
+        buildingColor: '#120820',
+        windowColors: ['#ff8844', '#cc6633'],
+        starColor: '#ffddaa',
+    },
+    {
+        name: 'Forest',
+        sky: ['#0a1a0a', '#0f2818', '#143622', '#1a4a2e', '#1e5e38'],
+        buildingColor: '#0a1508',
+        windowColors: ['#2a5e3a', '#1a4428'],
+        starColor: '#aaffaa',
+    },
+    {
+        name: 'Arctic',
+        sky: ['#0a1a2e', '#152840', '#203850', '#2a4a66', '#3a6080'],
+        buildingColor: '#0f2035',
+        windowColors: ['#4488aa', '#336688'],
+        starColor: '#cceeFF',
+    },
+    {
+        name: 'Volcano',
+        sky: ['#1a0a0a', '#2e1010', '#441818', '#5e2020', '#802a1a'],
+        buildingColor: '#150808',
+        windowColors: ['#ff4422', '#aa2211'],
+        starColor: '#ffaa88',
+    },
+];
+let showHowToPlay = false;
+let roundWins = { p1: 0, p2: 0 };
+
+// --- Key Rebinding ---
+let rebindState = null; // null = not rebinding, otherwise { player: 1|2, action: string, step: number }
+const KEY_ACTIONS = ['left', 'right', 'jump', 'down', 'shoot'];
+const KEY_ACTION_LABELS = { left: 'Move Left', right: 'Move Right', jump: 'Jump', down: 'Drop', shoot: 'Shoot' };
+// Custom key bindings (initialized to defaults)
+let customBindings = {
+    p1: { left: 'KeyA', right: 'KeyD', jump: 'KeyW', down: 'KeyS', shoot: 'Space' },
+    p2: { left: 'ArrowLeft', right: 'ArrowRight', jump: 'ArrowUp', down: 'ArrowDown', shoot: 'Enter' },
+};
+loadBindings();
+let rebindPlayer = 1; // which player is selected for rebinding
+let rebindCursor = 0; // which action is selected
+let rebindError = 0;  // timestamp of last error
+let rebindErrorKey = ''; // key that caused the error
+
+function getKeyDisplayName(code) {
+    const names = {
+        'KeyA': 'A', 'KeyB': 'B', 'KeyC': 'C', 'KeyD': 'D', 'KeyE': 'E', 'KeyF': 'F',
+        'KeyG': 'G', 'KeyH': 'H', 'KeyI': 'I', 'KeyJ': 'J', 'KeyK': 'K', 'KeyL': 'L',
+        'KeyM': 'M', 'KeyN': 'N', 'KeyO': 'O', 'KeyP': 'P', 'KeyQ': 'Q', 'KeyR': 'R',
+        'KeyS': 'S', 'KeyT': 'T', 'KeyU': 'U', 'KeyV': 'V', 'KeyW': 'W', 'KeyX': 'X',
+        'KeyY': 'Y', 'KeyZ': 'Z',
+        'Digit0': '0', 'Digit1': '1', 'Digit2': '2', 'Digit3': '3', 'Digit4': '4',
+        'Digit5': '5', 'Digit6': '6', 'Digit7': '7', 'Digit8': '8', 'Digit9': '9',
+        'Space': 'Space', 'Enter': 'Enter', 'ShiftLeft': 'L-Shift', 'ShiftRight': 'R-Shift',
+        'ControlLeft': 'L-Ctrl', 'ControlRight': 'R-Ctrl',
+        'ArrowUp': '\u2191', 'ArrowDown': '\u2193', 'ArrowLeft': '\u2190', 'ArrowRight': '\u2192',
+        'Comma': ',', 'Period': '.', 'Slash': '/', 'Semicolon': ';', 'Quote': "'",
+        'BracketLeft': '[', 'BracketRight': ']', 'Backslash': '\\', 'Minus': '-', 'Equal': '=',
+        'Backquote': '`', 'Tab': 'Tab', 'CapsLock': 'Caps',
+        'Numpad0': 'Num0', 'Numpad1': 'Num1', 'Numpad2': 'Num2', 'Numpad3': 'Num3',
+        'Numpad4': 'Num4', 'Numpad5': 'Num5', 'Numpad6': 'Num6', 'Numpad7': 'Num7',
+        'Numpad8': 'Num8', 'Numpad9': 'Num9',
+    };
+    return names[code] || code;
+}
 
 // --- Stats tracking ---
 let stats = {
@@ -88,18 +399,209 @@ window.addEventListener('keydown', (e) => {
     if (e.code === 'Space' || e.code === 'Enter' || e.code === 'ArrowUp' || e.code === 'ArrowDown') {
         e.preventDefault();
     }
-    if (gameState === 'start' && e.code === 'Digit1') {
-        gameMode = 'pvp';
-        resetGame();
+
+    // --- Start Screen ---
+    if (gameState === 'start') {
+        if (e.code === 'Enter') {
+            // Quick start with current settings
+            gameMode = settings.mode === 0 ? 'pvp' : 'pve';
+            platforms = MAPS[MAP_KEYS[settings.map]].platforms;
+            roundWins = { p1: 0, p2: 0 };
+            prerenderBackground();
+            resetGame();
+        }
+        if (e.code === 'Space') {
+            gameState = 'settings';
+            settingsCursor = 0;
+        }
     }
-    if (gameState === 'start' && e.code === 'Digit2') {
-        gameMode = 'pve';
-        resetGame();
+
+    // --- Settings Screen ---
+    else if (gameState === 'settings') {
+        if (showHowToPlay) {
+            if (e.code === 'KeyH' || e.code === 'Escape' || e.code === 'Enter' || e.code === 'Space') {
+                showHowToPlay = false;
+            }
+        } else if (settingsCategory === -1) {
+            // Category selection: System or Gameplay
+            if (e.code === 'ArrowUp' || e.code === 'KeyW' || e.code === 'ArrowLeft' || e.code === 'KeyA') {
+                settingsCursor = settingsCursor === 0 ? 1 : 0;
+            }
+            if (e.code === 'ArrowDown' || e.code === 'KeyS' || e.code === 'ArrowRight' || e.code === 'KeyD') {
+                settingsCursor = settingsCursor === 0 ? 1 : 0;
+            }
+            if (e.code === 'Enter' || e.code === 'Space') {
+                settingsCategory = settingsCursor;
+                settingsCursor = 0;
+            }
+            if (e.code === 'KeyH') {
+                showHowToPlay = true;
+            }
+            if (e.code === 'Escape') {
+                gameState = 'start';
+            }
+        } else if (settingsCategory === 0) {
+            // System settings: Map, Background, Sound, Language, Controls
+            const sysCount = 5;
+            if (e.code === 'ArrowUp' || e.code === 'KeyW') {
+                settingsCursor = (settingsCursor - 1 + sysCount) % sysCount;
+            }
+            if (e.code === 'ArrowDown' || e.code === 'KeyS') {
+                settingsCursor = (settingsCursor + 1) % sysCount;
+            }
+            if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+                if (settingsCursor === 0) settings.map = (settings.map - 1 + MAP_KEYS.length) % MAP_KEYS.length;
+                if (settingsCursor === 1) { settings.bg = (settings.bg - 1 + BG_THEMES.length) % BG_THEMES.length; prerenderBackground(); }
+                if (settingsCursor === 2) settings.sound = (settings.sound - 1 + SOUND_OPTIONS.length) % SOUND_OPTIONS.length;
+                if (settingsCursor === 3) settings.lang = (settings.lang - 1 + LANG_OPTIONS.length) % LANG_OPTIONS.length;
+                saveSettings();
+            }
+            if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+                if (settingsCursor === 0) settings.map = (settings.map + 1) % MAP_KEYS.length;
+                if (settingsCursor === 1) { settings.bg = (settings.bg + 1) % BG_THEMES.length; prerenderBackground(); }
+                if (settingsCursor === 2) settings.sound = (settings.sound + 1) % SOUND_OPTIONS.length;
+                if (settingsCursor === 3) settings.lang = (settings.lang + 1) % LANG_OPTIONS.length;
+                saveSettings();
+            }
+            if (e.code === 'Enter' || e.code === 'Space') {
+                if (settingsCursor === 4) {
+                    gameState = 'rebind';
+                    rebindPlayer = 1;
+                    rebindCursor = 0;
+                    rebindState = null;
+                }
+            }
+            if (e.code === 'KeyH') { showHowToPlay = true; }
+            if (e.code === 'Escape') {
+                settingsCategory = -1;
+                settingsCursor = 0;
+            }
+        } else if (settingsCategory === 1) {
+            // Gameplay settings: Mode, Rounds, HP, Power-Up Freq, AI Difficulty, Gravity, Sudden Death, Drop-Through, Infinite Ammo
+            const gpCount = 10;
+            if (e.code === 'ArrowUp' || e.code === 'KeyW') {
+                settingsCursor = (settingsCursor - 1 + gpCount) % gpCount;
+            }
+            if (e.code === 'ArrowDown' || e.code === 'KeyS') {
+                settingsCursor = (settingsCursor + 1) % gpCount;
+            }
+            if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+                if (settingsCursor === 0) settings.mode = (settings.mode - 1 + MODE_OPTIONS.length) % MODE_OPTIONS.length;
+                if (settingsCursor === 1) settings.bestOf = (settings.bestOf - 1 + BEST_OF_OPTIONS.length) % BEST_OF_OPTIONS.length;
+                if (settingsCursor === 2) settings.hp = (settings.hp - 1 + HP_OPTIONS.length) % HP_OPTIONS.length;
+                if (settingsCursor === 3) settings.puFreq = (settings.puFreq - 1 + PU_FREQ_OPTIONS.length) % PU_FREQ_OPTIONS.length;
+                if (settingsCursor === 4) settings.aiDiff = (settings.aiDiff - 1 + AI_DIFF_OPTIONS.length) % AI_DIFF_OPTIONS.length;
+                if (settingsCursor === 5) settings.gravity = (settings.gravity - 1 + GRAVITY_OPTIONS.length) % GRAVITY_OPTIONS.length;
+                if (settingsCursor === 6) settings.suddenDeath = (settings.suddenDeath - 1 + SUDDEN_DEATH_OPTIONS.length) % SUDDEN_DEATH_OPTIONS.length;
+                if (settingsCursor === 7) settings.dropThrough = (settings.dropThrough - 1 + DROP_THROUGH_OPTIONS.length) % DROP_THROUGH_OPTIONS.length;
+                if (settingsCursor === 8) settings.infiniteAmmo = (settings.infiniteAmmo - 1 + INFINITE_AMMO_OPTIONS.length) % INFINITE_AMMO_OPTIONS.length;
+                if (settingsCursor === 9) settings.ammoFreq = (settings.ammoFreq - 1 + AMMO_FREQ_OPTIONS.length) % AMMO_FREQ_OPTIONS.length;
+                saveSettings();
+            }
+            if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+                if (settingsCursor === 0) settings.mode = (settings.mode + 1) % MODE_OPTIONS.length;
+                if (settingsCursor === 1) settings.bestOf = (settings.bestOf + 1) % BEST_OF_OPTIONS.length;
+                if (settingsCursor === 2) settings.hp = (settings.hp + 1) % HP_OPTIONS.length;
+                if (settingsCursor === 3) settings.puFreq = (settings.puFreq + 1) % PU_FREQ_OPTIONS.length;
+                if (settingsCursor === 4) settings.aiDiff = (settings.aiDiff + 1) % AI_DIFF_OPTIONS.length;
+                if (settingsCursor === 5) settings.gravity = (settings.gravity + 1) % GRAVITY_OPTIONS.length;
+                if (settingsCursor === 6) settings.suddenDeath = (settings.suddenDeath + 1) % SUDDEN_DEATH_OPTIONS.length;
+                if (settingsCursor === 7) settings.dropThrough = (settings.dropThrough + 1) % DROP_THROUGH_OPTIONS.length;
+                if (settingsCursor === 8) settings.infiniteAmmo = (settings.infiniteAmmo + 1) % INFINITE_AMMO_OPTIONS.length;
+                if (settingsCursor === 9) settings.ammoFreq = (settings.ammoFreq + 1) % AMMO_FREQ_OPTIONS.length;
+                saveSettings();
+            }
+            if (e.code === 'KeyH') { showHowToPlay = true; }
+            if (e.code === 'Escape') {
+                settingsCategory = -1;
+                settingsCursor = 1;
+            }
+        }
+        // Start game from any settings sub-screen with F key
+        if (!showHowToPlay && e.code === 'KeyF') {
+            gameMode = settings.mode === 0 ? 'pvp' : 'pve';
+            platforms = MAPS[MAP_KEYS[settings.map]].platforms;
+            roundWins = { p1: 0, p2: 0 };
+            showHowToPlay = false;
+            settingsCategory = -1;
+            prerenderBackground();
+            resetGame();
+        }
     }
+
+    // --- Key Rebinding Screen ---
+    else if (gameState === 'rebind') {
+        if (rebindState) {
+            // Waiting for key press to assign
+            if (e.code === 'Escape') {
+                // Cancel rebinding
+                rebindState = null;
+            } else {
+                // Check if key is already used by either player
+                const pKey = rebindState.player === 1 ? 'p1' : 'p2';
+                const otherKey = rebindState.player === 1 ? 'p2' : 'p1';
+                let duplicate = false;
+                // Check same player
+                for (const action of KEY_ACTIONS) {
+                    if (action !== rebindState.action && customBindings[pKey][action] === e.code) {
+                        duplicate = true;
+                        break;
+                    }
+                }
+                // Check other player
+                if (!duplicate) {
+                    for (const action of KEY_ACTIONS) {
+                        if (customBindings[otherKey][action] === e.code) {
+                            duplicate = true;
+                            break;
+                        }
+                    }
+                }
+                if (duplicate) {
+                    // Show error briefly, don't assign
+                    rebindError = Date.now();
+                    rebindErrorKey = e.code;
+                } else {
+                    customBindings[pKey][rebindState.action] = e.code;
+                    rebindState = null;
+                    saveBindings();
+                }
+            }
+        } else {
+            if (e.code === 'ArrowUp' || e.code === 'KeyW') {
+                rebindCursor = (rebindCursor - 1 + KEY_ACTIONS.length) % KEY_ACTIONS.length;
+            }
+            if (e.code === 'ArrowDown' || e.code === 'KeyS') {
+                rebindCursor = (rebindCursor + 1) % KEY_ACTIONS.length;
+            }
+            if (e.code === 'ArrowLeft' || e.code === 'ArrowRight' || e.code === 'KeyA' || e.code === 'KeyD') {
+                rebindPlayer = rebindPlayer === 1 ? 2 : 1;
+            }
+            if (e.code === 'Enter' || e.code === 'Space') {
+                // Start listening for new key
+                rebindState = { player: rebindPlayer, action: KEY_ACTIONS[rebindCursor] };
+            }
+            if (e.code === 'Escape') {
+                gameState = 'settings';
+            }
+        }
+    }
+
+    // --- Game Over ---
     if (gameState === 'gameover' && e.code === 'KeyR') {
-        resetGame(); // keeps current gameMode
+        const winsNeeded = Math.ceil(BEST_OF_OPTIONS[settings.bestOf] / 2);
+        if (roundWins.p1 >= winsNeeded || roundWins.p2 >= winsNeeded) {
+            // Match is over, go back to start
+            roundWins = { p1: 0, p2: 0 };
+            gameState = 'start';
+        } else {
+            // Next round
+            resetGame();
+        }
     }
-    if ((gameState === 'playing' || gameState === 'gameover' || gameState === 'dying') && e.code === 'Escape') {
+
+    // --- Escape from game ---
+    if ((gameState === 'playing' || gameState === 'gameover' || gameState === 'dying' || gameState === 'roundover') && e.code === 'Escape') {
         // Clear AI virtual keys so they don't persist
         AI.reset();
         if (player2) {
@@ -111,6 +613,7 @@ window.addEventListener('keydown', (e) => {
             keys[c.down] = false;
         }
         gameMode = null;
+        roundWins = { p1: 0, p2: 0 };
         gameState = 'start';
     }
 });
@@ -371,14 +874,61 @@ const bulletSprite = [
 // ============================================
 // PLATFORMS
 // ============================================
-const platforms = [
-    { x: 0, y: 470, w: 800, h: 30, isGround: true },
-    { x: 150, y: 370, w: 150, h: 16 },
-    { x: 500, y: 370, w: 150, h: 16 },
-    { x: 300, y: 270, w: 200, h: 16 },
-    { x: 50, y: 180, w: 120, h: 16 },
-    { x: 630, y: 180, w: 120, h: 16 },
-];
+// --- MAP DEFINITIONS ---
+const MAPS = {
+    classic: {
+        name: 'Classic',
+        platforms: [
+            { x: 0, y: 470, w: 800, h: 30, isGround: true },
+            { x: 150, y: 370, w: 150, h: 16 },
+            { x: 500, y: 370, w: 150, h: 16 },
+            { x: 300, y: 270, w: 200, h: 16 },
+            { x: 50, y: 180, w: 120, h: 16 },
+            { x: 630, y: 180, w: 120, h: 16 },
+        ],
+    },
+    towers: {
+        name: 'Towers',
+        platforms: [
+            { x: 0, y: 470, w: 800, h: 30, isGround: true },
+            { x: 30, y: 370, w: 100, h: 16 },
+            { x: 670, y: 370, w: 100, h: 16 },
+            { x: 30, y: 270, w: 100, h: 16 },
+            { x: 670, y: 270, w: 100, h: 16 },
+            { x: 30, y: 170, w: 100, h: 16 },
+            { x: 670, y: 170, w: 100, h: 16 },
+            { x: 300, y: 320, w: 200, h: 16 },
+        ],
+    },
+    pyramid: {
+        name: 'Pyramid',
+        platforms: [
+            { x: 0, y: 470, w: 800, h: 30, isGround: true },
+            { x: 50, y: 340, w: 120, h: 16 },
+            { x: 630, y: 340, w: 120, h: 16 },
+            { x: 200, y: 250, w: 400, h: 16 },
+            { x: 320, y: 150, w: 160, h: 16 },
+        ],
+    },
+    chaos: {
+        name: 'Chaos',
+        platforms: [
+            { x: 0, y: 470, w: 800, h: 30, isGround: true },
+            { x: 50, y: 400, w: 80, h: 16 },
+            { x: 200, y: 350, w: 80, h: 16 },
+            { x: 350, y: 300, w: 80, h: 16 },
+            { x: 500, y: 350, w: 80, h: 16 },
+            { x: 670, y: 400, w: 80, h: 16 },
+            { x: 120, y: 240, w: 100, h: 16 },
+            { x: 580, y: 240, w: 100, h: 16 },
+            { x: 340, y: 180, w: 120, h: 16 },
+            { x: 100, y: 140, w: 60, h: 16 },
+            { x: 640, y: 140, w: 60, h: 16 },
+        ],
+    },
+};
+const MAP_KEYS = Object.keys(MAPS);
+let platforms = MAPS.classic.platforms;
 
 // ============================================
 // PLAYER CLASS
@@ -395,7 +945,7 @@ class Player {
         this.name = name;
         this.controls = controls;
         this.sprites = sprites;
-        this.hp = MAX_HP;
+        this.hp = HP_OPTIONS[settings.hp];
         this.facing = controls.facingDefault;
         this.onGround = false;
         this.lastShot = 0;
@@ -409,6 +959,7 @@ class Player {
         this.activePowerups = {}; // type -> expiry timestamp
         this.dropThrough = false; // falling through platform
         this.dropPlatform = null; // which platform to ignore
+        this.ammo = START_AMMO; // ammo count (only used when infiniteAmmo is Off)
     }
 
     update() {
@@ -425,12 +976,14 @@ class Player {
         }
 
         if (keys[this.controls.jump] && this.onGround) {
-            this.vy = JUMP_FORCE;
+            // Scale jump force with gravity so jump height stays proportional
+            const gravScale = GRAVITY_OPTIONS[settings.gravity].value / 0.6;
+            this.vy = JUMP_FORCE * Math.sqrt(gravScale);
             this.onGround = false;
         }
 
         // Drop through platform (one-press trigger)
-        if (keys[this.controls.down] && this.onGround && !this.dropPressed) {
+        if (settings.dropThrough === 0 && keys[this.controls.down] && this.onGround && !this.dropPressed) {
             this.dropPressed = true;
             for (const p of platforms) {
                 if (p.isGround) continue;
@@ -475,7 +1028,7 @@ class Player {
         if (this.hitFlash > 0) this.hitFlash--;
         if (this.muzzleFlash > 0) this.muzzleFlash--;
 
-        this.vy += GRAVITY;
+        this.vy += GRAVITY_OPTIONS[settings.gravity].value;
         this.x += this.vx;
 
         if (this.x < 0) this.x = 0;
@@ -556,7 +1109,7 @@ class Player {
         if (this === player1) stats.p1.powerupsCollected++;
         else if (this === player2) stats.p2.powerupsCollected++;
         if (type === 'heal') {
-            this.hp = Math.min(MAX_HP, this.hp + 40);
+            this.hp = Math.min(HP_OPTIONS[settings.hp], this.hp + 40);
             spawnCollectBurst(cx, cy, '#44dd44');
         } else {
             this.activePowerups[type] = Date.now() + def.duration;
@@ -566,14 +1119,17 @@ class Player {
 
     shoot() {
         const now = Date.now();
+        // Check ammo (limited ammo mode)
+        if (settings.infiniteAmmo === 1 && this.ammo <= 0) return;
         const isAI = gameMode === 'pve' && this === player2;
-        let cooldown = isAI ? AI_SHOOT_COOLDOWN : SHOOT_COOLDOWN;
+        let cooldown = isAI ? AI_DIFF_OPTIONS[settings.aiDiff].cooldown : SHOOT_COOLDOWN;
         if (this.hasPowerup('nocooldown')) {
             cooldown = Math.floor(cooldown * 0.5);
         }
         if (now - this.lastShot < cooldown) return;
         this.lastShot = now;
         this.muzzleFlash = 6;
+        if (settings.infiniteAmmo === 1) this.ammo--;
 
         // Track stats
         if (this === player1) stats.p1.shotsFired++;
@@ -704,7 +1260,7 @@ class Player {
         ctx.fillRect(barX - 1, barY - 1, barW + 2, barH + 2);
 
         // HP fill
-        const hpRatio = Math.max(0, this.hp / MAX_HP);
+        const hpRatio = Math.max(0, this.hp / HP_OPTIONS[settings.hp]);
         if (hpRatio > 0.5) {
             ctx.fillStyle = '#44cc44';
         } else if (hpRatio > 0.25) {
@@ -748,6 +1304,16 @@ class Player {
             puBarOffset++;
         }
 
+        // Ammo counter (limited ammo mode)
+        if (settings.infiniteAmmo === 1) {
+            const ammoX = barX + barW + 5;
+            const ammoColor = this.ammo <= 3 ? '#ff4444' : (this.ammo <= 6 ? '#ffaa00' : '#aaddff');
+            ctx.fillStyle = ammoColor;
+            ctx.font = 'bold 8px monospace';
+            ctx.textAlign = 'left';
+            ctx.fillText(this.ammo, ammoX, barY + barH);
+        }
+
         // Name
         ctx.fillStyle = this.color;
         ctx.font = 'bold 10px monospace';
@@ -779,7 +1345,7 @@ class Player {
                 x: this.x + this.w / 2 + (Math.random() - 0.5) * 20,
                 y: this.y - 10,
                 vy: -2.5,
-                text: 'BLOCKED',
+                text: T('blocked'),
                 color: '#ffdd00',
                 life: 35,
                 maxLife: 35,
@@ -995,7 +1561,7 @@ const AI = {
 
     update(aiPlayer, humanPlayer) {
         this.thinkTimer++;
-        if (this.thinkTimer < this.thinkInterval) return;
+        if (this.thinkTimer < AI_DIFF_OPTIONS[settings.aiDiff].thinkInterval) return;
         this.thinkTimer = 0;
 
         this.wantsLeft = false;
@@ -1096,12 +1662,14 @@ const AI = {
 
         // --- Always shoot at human if roughly aligned ---
         if (Math.abs(humanCY - aiCY) < 60) {
-            this.wantsShoot = true;
+            if (Math.random() < AI_DIFF_OPTIONS[settings.aiDiff].accuracy) {
+                this.wantsShoot = true;
+            }
             aiPlayer.facing = humanCX > aiCX ? 1 : -1;
         }
 
         // --- Drop through platform if target is below ---
-        if (targetY > aiFeetY + 40 && aiPlayer.onGround) {
+        if (settings.dropThrough === 0 && targetY > aiFeetY + 40 && aiPlayer.onGround) {
             for (const p of platforms) {
                 if (p.isGround) continue;
                 if (
@@ -1203,7 +1771,9 @@ const AI = {
         const dist = Math.hypot(dx, dy);
 
         aiPlayer.facing = dx > 0 ? 1 : -1;
-        this.wantsShoot = true;
+        if (Math.random() < AI_DIFF_OPTIONS[settings.aiDiff].accuracy) {
+            this.wantsShoot = true;
+        }
 
         if (dist < 80) {
             if (dx > 0) this.wantsLeft = true;
@@ -1258,21 +1828,21 @@ let player1, player2;
 
 function createPlayers() {
     player1 = new Player(100, 400, '#4ecdc4', 'Player 1', {
-        left: 'KeyA',
-        right: 'KeyD',
-        jump: 'KeyW',
-        down: 'KeyS',
-        shoot: 'Space',
+        left: customBindings.p1.left,
+        right: customBindings.p1.right,
+        jump: customBindings.p1.jump,
+        down: customBindings.p1.down,
+        shoot: customBindings.p1.shoot,
         facingDefault: 1,
     }, sprites1);
 
     const p2Name = gameMode === 'pve' ? 'AI' : 'Player 2';
     player2 = new Player(650, 400, '#e94560', p2Name, {
-        left: 'ArrowLeft',
-        right: 'ArrowRight',
-        jump: 'ArrowUp',
-        down: 'ArrowDown',
-        shoot: 'Enter',
+        left: customBindings.p2.left,
+        right: customBindings.p2.right,
+        jump: customBindings.p2.jump,
+        down: customBindings.p2.down,
+        shoot: customBindings.p2.shoot,
         facingDefault: -1,
     }, sprites2);
 }
@@ -1303,7 +1873,8 @@ function updatePowerups() {
     const now = Date.now();
 
     // Spawn new power-ups
-    if (now - lastPowerupSpawn > POWERUP_SPAWN_INTERVAL && powerups.length < 3) {
+    const puInterval = PU_FREQ_OPTIONS[settings.puFreq].interval;
+    if (now - lastPowerupSpawn > puInterval && powerups.length < 3) {
         spawnPowerup();
         lastPowerupSpawn = now;
     }
@@ -1379,6 +1950,102 @@ function drawPowerups() {
 }
 
 // ============================================
+// AMMO PICKUPS
+// ============================================
+function spawnAmmoPickup() {
+    const plats = platforms.filter(p => !p.isGround);
+    const plat = plats[Math.floor(Math.random() * plats.length)];
+    const size = 16;
+    const x = plat.x + Math.random() * (plat.w - size);
+    const y = plat.y - size - 4;
+    ammoPickups.push({
+        x, y, w: size, h: size,
+        spawnTime: Date.now(),
+        bobOffset: Math.random() * Math.PI * 2,
+    });
+}
+
+function updateAmmoPickups() {
+    if (settings.infiniteAmmo === 0) return; // infinite ammo = no pickups needed
+    const now = Date.now();
+
+    // Spawn new ammo pickups
+    const ammoInterval = AMMO_FREQ_OPTIONS[settings.ammoFreq].interval;
+    if (now - lastAmmoSpawn > ammoInterval && ammoPickups.length < 2) {
+        spawnAmmoPickup();
+        lastAmmoSpawn = now;
+    }
+
+    // Remove old (despawn after 8s)
+    for (let i = ammoPickups.length - 1; i >= 0; i--) {
+        if (now - ammoPickups[i].spawnTime > 8000) {
+            spawnParticles(ammoPickups[i].x + 8, ammoPickups[i].y, '#888', 3);
+            ammoPickups.splice(i, 1);
+        }
+    }
+
+    // Check collection
+    for (let i = ammoPickups.length - 1; i >= 0; i--) {
+        const ap = ammoPickups[i];
+        for (const player of [player1, player2]) {
+            if (
+                player.x + player.w > ap.x &&
+                player.x < ap.x + ap.w &&
+                player.y + player.h > ap.y &&
+                player.y < ap.y + ap.h
+            ) {
+                player.ammo += AMMO_PICKUP_AMOUNT;
+                spawnCollectBurst(ap.x + ap.w / 2, ap.y + ap.h / 2, '#aaddff');
+                ammoPickups.splice(i, 1);
+                break;
+            }
+        }
+    }
+}
+
+function drawAmmoPickups() {
+    if (settings.infiniteAmmo === 0) return;
+    for (const ap of ammoPickups) {
+        const bob = Math.sin(frameCount * 0.08 + ap.bobOffset) * 3;
+        const drawY = ap.y + bob;
+        const color = '#aaddff';
+        const colorDark = '#5588aa';
+
+        // Glow
+        ctx.globalAlpha = 0.2 + 0.1 * Math.sin(frameCount * 0.1);
+        ctx.fillStyle = color;
+        ctx.fillRect(ap.x - 2, drawY - 2, ap.w + 4, ap.h + 4);
+        ctx.globalAlpha = 1;
+
+        // Box
+        ctx.fillStyle = '#1a1a2e';
+        ctx.fillRect(ap.x, drawY, ap.w, ap.h);
+        ctx.fillStyle = color;
+        ctx.fillRect(ap.x, drawY, ap.w, 2);
+        ctx.fillRect(ap.x, drawY + ap.h - 2, ap.w, 2);
+        ctx.fillRect(ap.x, drawY, 2, ap.h);
+        ctx.fillRect(ap.x + ap.w - 2, drawY, 2, ap.h);
+        ctx.fillStyle = colorDark;
+        ctx.fillRect(ap.x + 2, drawY + 2, ap.w - 4, ap.h - 4);
+
+        // Bullet symbol
+        ctx.fillStyle = color;
+        ctx.font = 'bold 10px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('A', ap.x + ap.w / 2, drawY + ap.h / 2 + 4);
+
+        // Despawn blink
+        const age = Date.now() - ap.spawnTime;
+        if (age > 5000 && Math.floor(Date.now() / 200) % 2) {
+            ctx.globalAlpha = 0.5;
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(ap.x, drawY, ap.w, ap.h);
+            ctx.globalAlpha = 1;
+        }
+    }
+}
+
+// ============================================
 // COLLISION
 // ============================================
 function checkBulletHits() {
@@ -1426,11 +2093,13 @@ function checkWin() {
         winner = player2;
         loser = player1;
         deathTimer = DEATH_DURATION;
+        roundWins.p2++;
     } else if (player2.hp <= 0) {
         gameState = 'dying';
         winner = player1;
         loser = player2;
         deathTimer = DEATH_DURATION;
+        roundWins.p1++;
     }
 }
 
@@ -1619,11 +2288,8 @@ bgCanvas.height = canvas.height;
 const bgCtx = bgCanvas.getContext('2d');
 
 function prerenderBackground() {
-    const origCtx = ctx;
-    // Temporarily swap context
-    const savedCtx = ctx;
-    // We need to draw to bgCanvas
-    const colors = ['#0a0a1a', '#0f1128', '#141836', '#16213e', '#1a2744'];
+    const theme = BG_THEMES[settings.bg];
+    const colors = theme.sky;
     const stripeH = canvas.height / colors.length;
     for (let i = 0; i < colors.length; i++) {
         bgCtx.fillStyle = colors[i];
@@ -1631,11 +2297,11 @@ function prerenderBackground() {
     }
     // City silhouette
     for (const b of buildings) {
-        bgCtx.fillStyle = '#0d1525';
+        bgCtx.fillStyle = theme.buildingColor;
         bgCtx.fillRect(b.x, 470 - b.h, b.w, b.h);
         for (let wy = 470 - b.h + 6; wy < 465; wy += 12) {
             for (let wx = b.x + 4; wx < b.x + b.w - 4; wx += 8) {
-                bgCtx.fillStyle = (Math.random() > 0.5) ? '#2a3a5e' : '#1a2744';
+                bgCtx.fillStyle = (Math.random() > 0.5) ? theme.windowColors[0] : theme.windowColors[1];
                 bgCtx.fillRect(wx, wy, 4, 6);
             }
         }
@@ -1647,10 +2313,11 @@ function drawBg() {
     ctx.drawImage(bgCanvas, 0, 0);
 
     // Animated stars on top
+    const starColor = BG_THEMES[settings.bg].starColor;
     for (const s of stars) {
         const twinkle = Math.sin(frameCount * s.twinkleSpeed + s.twinkleOffset);
         ctx.globalAlpha = 0.3 + 0.5 * (twinkle * 0.5 + 0.5);
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = starColor;
         ctx.fillRect(Math.floor(s.x), Math.floor(s.y), s.size, s.size);
     }
     ctx.globalAlpha = 1;
@@ -1692,7 +2359,7 @@ function drawStartScreen() {
     ctx.fillText('SHOOOTER 2D', canvas.width / 2 + 1, 103);
     ctx.globalAlpha = 1;
     drawPixelText('SHOOOTER 2D', canvas.width / 2, 100, Math.floor(titleSize), '#e94560');
-    drawPixelText('Choose your mode!', canvas.width / 2, 140, 14, '#ffffff');
+    drawPixelText(T('subtitle'), canvas.width / 2, 140, 14, '#ffffff');
 
     // Animated idle sprites on title screen (gentle bob)
     const idleBob = Math.sin(frameCount * 0.06) * 2;
@@ -1720,24 +2387,28 @@ function drawStartScreen() {
     ctx.font = 'bold 13px monospace';
     ctx.textAlign = 'left';
 
+    const b1 = customBindings.p1;
+    const b2 = customBindings.p2;
+    const K = getKeyDisplayName;
+
     ctx.fillStyle = '#4ecdc4';
-    ctx.fillText('PLAYER 1', 135, 250);
+    ctx.fillText(T('player1'), 135, 250);
     ctx.fillStyle = '#aaa';
     ctx.font = '12px monospace';
-    ctx.fillText('Move:      A / D', 135, 272);
-    ctx.fillText('Jump:      W', 135, 292);
-    ctx.fillText('Drop:      S', 135, 312);
-    ctx.fillText('Shoot:     Space', 135, 332);
+    ctx.fillText(T('move') + '      ' + K(b1.left) + ' / ' + K(b1.right), 135, 272);
+    ctx.fillText(T('jump') + '      ' + K(b1.jump), 135, 292);
+    ctx.fillText(T('drop') + '      ' + K(b1.down), 135, 312);
+    ctx.fillText(T('shoot') + '     ' + K(b1.shoot), 135, 332);
 
     ctx.font = 'bold 13px monospace';
     ctx.fillStyle = '#e94560';
-    ctx.fillText('PLAYER 2', 475, 250);
+    ctx.fillText(T('player2'), 475, 250);
     ctx.fillStyle = '#aaa';
     ctx.font = '12px monospace';
-    ctx.fillText('Move:      \u2190 / \u2192', 475, 272);
-    ctx.fillText('Jump:      \u2191', 475, 292);
-    ctx.fillText('Drop:      \u2193', 475, 312);
-    ctx.fillText('Shoot:     Enter', 475, 332);
+    ctx.fillText(T('move') + '      ' + K(b2.left) + ' / ' + K(b2.right), 475, 272);
+    ctx.fillText(T('jump') + '      ' + K(b2.jump), 475, 292);
+    ctx.fillText(T('drop') + '      ' + K(b2.down), 475, 312);
+    ctx.fillText(T('shoot') + '     ' + K(b2.shoot), 475, 332);
 
     // Power-Up legend
     ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
@@ -1748,7 +2419,7 @@ function drawStartScreen() {
     ctx.font = 'bold 11px monospace';
     ctx.textAlign = 'center';
     ctx.fillStyle = '#ffffff';
-    ctx.fillText('POWER-UPS', canvas.width / 2, 375);
+    ctx.fillText(T('puTitle'), canvas.width / 2, 375);
 
     const puTypes = Object.values(POWERUP_TYPES);
     const puCount = puTypes.length;
@@ -1776,63 +2447,474 @@ function drawStartScreen() {
         ctx.fillText(puTypes[i].description, px, py + 24);
     }
 
-    // Mode selection
+    // Start prompts
+    const blink = Math.floor(Date.now() / 400) % 2;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    ctx.fillRect(150, 424, 500, 52);
+    ctx.fillStyle = '#ffdd00';
+    ctx.fillRect(150, 424, 500, 2);
+    ctx.fillRect(150, 474, 500, 2);
+    drawPixelText(T('pressEnter'), canvas.width / 2, 444, 16, blink ? '#ffdd00' : '#ffaa00');
+    drawPixelText(T('pressSpace'), canvas.width / 2, 466, 11, '#888');
+}
+
+function drawSettingsScreen() {
+    drawBg();
+    drawPlatforms();
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    if (settingsCategory === -1) {
+        // --- Category Selection ---
+        drawPixelText(T('settings'), canvas.width / 2, 60, 32, '#ffdd00');
+
+        const categories = [
+            { name: T('system'), icon: '\u2699', desc: T('sysDesc'), color: '#4ecdc4' },
+            { name: T('gameplay'), icon: '\u2694', desc: T('gpDesc'), color: '#e94560' },
+        ];
+
+        for (let i = 0; i < categories.length; i++) {
+            const cat = categories[i];
+            const bx = 120 + i * 290;
+            const by = 150;
+            const bw = 260;
+            const bh = 220;
+            const selected = settingsCursor === i;
+            const borderCol = selected ? cat.color : '#555';
+            const pulse = selected ? Math.sin(Date.now() / 200) * 0.15 + 0.85 : 0.5;
+
+            // Box background
+            ctx.fillStyle = selected ? `rgba(${i === 0 ? '78,205,196' : '233,69,96'}, 0.15)` : 'rgba(0, 0, 0, 0.5)';
+            ctx.fillRect(bx, by, bw, bh);
+            // Border
+            ctx.fillStyle = borderCol;
+            ctx.fillRect(bx, by, bw, 3);
+            ctx.fillRect(bx, by + bh - 3, bw, 3);
+            ctx.fillRect(bx, by, 3, bh);
+            ctx.fillRect(bx + bw - 3, by, 3, bh);
+
+            // Icon area
+            drawPixelText(cat.icon, bx + bw / 2, by + 60, 36, selected ? cat.color : '#666');
+            // Name
+            drawPixelText(cat.name, bx + bw / 2, by + 120, 20, selected ? '#ffffff' : '#888');
+            // Description
+            drawPixelText(cat.desc, bx + bw / 2, by + 160, 9, selected ? '#aaa' : '#555');
+
+            // Selection indicator
+            if (selected) {
+                const arrowBlink = Math.floor(Date.now() / 300) % 2;
+                drawPixelText('\u25B6', bx + bw / 2, by + 195, 14, arrowBlink ? cat.color : '#666');
+            }
+        }
+
+        const blink = Math.floor(Date.now() / 500) % 2;
+        drawPixelText(T('selectCat'), canvas.width / 2, 420, 10, blink ? '#aaa' : '#666');
+        drawPixelText(T('pressH'), canvas.width / 2, 440, 10, '#4ecdc4');
+
+    } else if (settingsCategory === 0) {
+        // --- System Settings ---
+        drawPixelText(T('system'), canvas.width / 2, 60, 28, '#4ecdc4');
+
+        const soundVal = settings.sound === 0 ? T('on') : T('off');
+        const options = [
+            { label: T('lblMap'), value: MAPS[MAP_KEYS[settings.map]].name, hasArrows: true },
+            { label: T('lblBg'), value: BG_THEMES[settings.bg].name, hasArrows: true },
+            { label: T('lblSound'), value: soundVal, hasArrows: true },
+            { label: T('lblLang'), value: LANG_OPTIONS[settings.lang], hasArrows: true },
+            { label: T('lblControls'), value: T('pressEnterEdit'), hasArrows: false },
+        ];
+
+        drawSettingsOptions(options, 90);
+
+        // Map preview
+        const previewY = 340;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.fillRect(150, previewY, 500, 55);
+        ctx.fillStyle = '#444';
+        ctx.fillRect(150, previewY, 500, 2);
+        ctx.fillRect(150, previewY + 53, 500, 2);
+        drawPixelText(T('mapPreview'), canvas.width / 2, previewY + 13, 10, '#888');
+
+        const previewMap = MAPS[MAP_KEYS[settings.map]].platforms;
+        const scale = 0.1;
+        const offsetX = 200;
+        const offsetY = previewY - 25;
+        for (const p of previewMap) {
+            ctx.fillStyle = p.isGround ? '#8b6914' : '#7755aa';
+            ctx.fillRect(offsetX + p.x * scale, offsetY + p.y * scale, Math.max(p.w * scale, 4), Math.max(p.h * scale, 2));
+        }
+
+        // Background preview swatch
+        const theme = BG_THEMES[settings.bg];
+        const swatchX = 540;
+        const swatchW = 100;
+        for (let i = 0; i < theme.sky.length; i++) {
+            ctx.fillStyle = theme.sky[i];
+            ctx.fillRect(swatchX, previewY + 5 + i * 9, swatchW, 9);
+        }
+        ctx.fillStyle = '#444';
+        ctx.fillRect(swatchX, previewY + 3, swatchW, 2);
+        ctx.fillRect(swatchX, previewY + 50, swatchW, 2);
+        ctx.fillRect(swatchX, previewY + 3, 2, 49);
+        ctx.fillRect(swatchX + swatchW - 2, previewY + 3, 2, 49);
+
+        const blink = Math.floor(Date.now() / 500) % 2;
+        drawPixelText(T('arrowChange'), canvas.width / 2, 430, 10, blink ? '#aaa' : '#666');
+        drawPixelText(T('pressH'), canvas.width / 2, 450, 10, '#4ecdc4');
+
+    } else if (settingsCategory === 1) {
+        // --- Gameplay Settings ---
+        drawPixelText(T('gameplay'), canvas.width / 2, 60, 28, '#e94560');
+
+        const modeVal = settings.mode === 0 ? T('pvp') : T('pve');
+        const puVal = [T('off'), T('normal'), T('frequent'), T('chaos')][settings.puFreq];
+        const aiVal = [T('easy'), T('medium'), T('hard')][settings.aiDiff];
+        const gravVal = [T('moon'), T('normal'), T('heavy')][settings.gravity];
+        const sdVal = [T('off'), T('after30'), T('after60'), T('after90')][settings.suddenDeath];
+        const dtVal = settings.dropThrough === 0 ? T('on') : T('off');
+        const iaVal = settings.infiniteAmmo === 0 ? T('on') : T('off');
+        const ammoFVal = [T('slow'), T('normal'), T('fast'), T('veryFast')][settings.ammoFreq];
+
+        const options = [
+            { label: T('lblMode'), value: modeVal, hasArrows: true },
+            { label: T('lblRounds'), value: T('bestOf') + BEST_OF_OPTIONS[settings.bestOf], hasArrows: true },
+            { label: T('lblMaxHp'), value: HP_OPTIONS[settings.hp] + ' HP', hasArrows: true },
+            { label: T('lblPuFreq'), value: puVal, hasArrows: true },
+            { label: T('lblAiDiff'), value: aiVal, hasArrows: true },
+            { label: T('lblGravity'), value: gravVal, hasArrows: true },
+            { label: T('lblSuddenDeath'), value: sdVal, hasArrows: true },
+            { label: T('lblDropThrough'), value: dtVal, hasArrows: true },
+            { label: T('lblInfAmmo'), value: iaVal, hasArrows: true },
+            { label: T('lblAmmoFreq'), value: ammoFVal, hasArrows: true },
+        ];
+
+        drawSettingsOptions(options, 78);
+
+        const blink = Math.floor(Date.now() / 500) % 2;
+        drawPixelText(T('arrowChange'), canvas.width / 2, 490, 9, blink ? '#aaa' : '#666');
+        drawPixelText(T('pressH'), canvas.width / 2, 506, 9, '#4ecdc4');
+    }
+
+    // How to Play overlay
+    if (showHowToPlay) {
+        drawHowToPlay();
+    }
+}
+
+// Helper to draw a list of setting options with cursor highlight
+function drawSettingsOptions(options, startY) {
+    const spacing = options.length > 9 ? 40 : (options.length > 7 ? 44 : (options.length > 5 ? 48 : 52));
+    const boxH = options.length > 9 ? 30 : (options.length > 7 ? 34 : (options.length > 5 ? 36 : 40));
+    for (let i = 0; i < options.length; i++) {
+        const y = startY + i * spacing;
+        const selected = settingsCursor === i;
+        const boxColor = selected ? '#ffdd00' : '#555';
+
+        // Box
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.fillRect(150, y, 500, boxH);
+        ctx.fillStyle = boxColor;
+        ctx.fillRect(150, y, 500, 2);
+        ctx.fillRect(150, y + boxH - 2, 500, 2);
+        ctx.fillRect(150, y, 2, boxH);
+        ctx.fillRect(648, y, 2, boxH);
+
+        // Label + value on same line
+        drawPixelText(options[i].label, 240, y + boxH / 2 + 4, 11, selected ? '#ffdd00' : '#888');
+
+        const midY = y + boxH / 2 + 4;
+        if (selected && options[i].hasArrows) {
+            const arrowBlink = Math.floor(Date.now() / 300) % 2;
+            drawPixelText('<', 370, midY, 14, arrowBlink ? '#ffdd00' : '#aa8800');
+            drawPixelText('>', 540, midY, 14, arrowBlink ? '#ffdd00' : '#aa8800');
+        }
+        const isControls = options[i].label === 'CONTROLS';
+        const valColor = (isControls && selected) ? '#4ecdc4' : (selected ? '#ffffff' : '#aaa');
+        drawPixelText(options[i].value, 455, midY, 12, valColor);
+    }
+}
+
+function drawRebindScreen() {
+    drawBg();
+    drawPlatforms();
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    drawPixelText(T('keyBindings'), canvas.width / 2, 55, 28, '#ffdd00');
+
+    // Player tabs
+    const tab1Selected = rebindPlayer === 1;
+    const tab2Selected = rebindPlayer === 2;
+
+    // Player 1 tab
+    ctx.fillStyle = tab1Selected ? 'rgba(78, 205, 196, 0.2)' : 'rgba(0, 0, 0, 0.4)';
+    ctx.fillRect(150, 80, 240, 34);
+    ctx.fillStyle = tab1Selected ? '#4ecdc4' : '#555';
+    ctx.fillRect(150, 80, 240, 2);
+    ctx.fillRect(150, 112, 240, 2);
+    drawPixelText(T('p1Label'), 270, 102, 14, tab1Selected ? '#4ecdc4' : '#666');
+
+    // Player 2 tab
+    ctx.fillStyle = tab2Selected ? 'rgba(233, 69, 96, 0.2)' : 'rgba(0, 0, 0, 0.4)';
+    ctx.fillRect(410, 80, 240, 34);
+    ctx.fillStyle = tab2Selected ? '#e94560' : '#555';
+    ctx.fillRect(410, 80, 240, 2);
+    ctx.fillRect(410, 112, 240, 2);
+    drawPixelText(T('p2Label'), 530, 102, 14, tab2Selected ? '#e94560' : '#666');
+
+    // Arrow hints between tabs
+    const arrowBlink = Math.floor(Date.now() / 400) % 2;
+    drawPixelText('\u2190 \u2192', 400, 102, 12, arrowBlink ? '#ffdd00' : '#886600');
+
+    // Key bindings list
+    const pKey = rebindPlayer === 1 ? 'p1' : 'p2';
+    const playerColor = rebindPlayer === 1 ? '#4ecdc4' : '#e94560';
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    ctx.fillRect(150, 125, 500, KEY_ACTIONS.length * 52 + 10);
+    ctx.fillStyle = '#444';
+    ctx.fillRect(150, 125, 500, 2);
+    ctx.fillRect(150, 125 + KEY_ACTIONS.length * 52 + 8, 500, 2);
+
+    for (let i = 0; i < KEY_ACTIONS.length; i++) {
+        const action = KEY_ACTIONS[i];
+        const y = 145 + i * 52;
+        const selected = rebindCursor === i;
+        const isRebinding = rebindState && rebindState.action === action && rebindState.player === rebindPlayer;
+
+        // Highlight selected row
+        if (selected) {
+            ctx.fillStyle = 'rgba(255, 221, 0, 0.1)';
+            ctx.fillRect(155, y - 8, 490, 44);
+            ctx.fillStyle = '#ffdd00';
+            ctx.fillRect(155, y - 8, 2, 44);
+        }
+
+        // Action label
+        const actionLabel = { left: T('moveLeft'), right: T('moveRight'), jump: T('jump'), down: T('drop'), shoot: T('shoot') }[action];
+        drawPixelText(actionLabel, 260, y + 10, 14, selected ? '#ffffff' : '#aaa');
+
+        // Current key
+        if (isRebinding) {
+            const hasError = rebindError && Date.now() - rebindError < 3000;
+            if (hasError) {
+                const errBlink = Math.floor(Date.now() / 400) % 2;
+                drawPixelText(`"${getKeyDisplayName(rebindErrorKey)}" ${T('alreadyUsed')}`, 470, y + 10, 12, errBlink ? '#ff4444' : '#aa2222');
+                drawPixelText(T('tryAnother'), 470, y + 28, 9, '#aa6666');
+            } else {
+                const waitBlink = Math.floor(Date.now() / 300) % 2;
+                drawPixelText(T('pressKey'), 470, y + 10, 14, waitBlink ? '#ff4444' : '#aa2222');
+            }
+        } else {
+            const keyName = getKeyDisplayName(customBindings[pKey][action]);
+            // Key badge
+            const badgeW = Math.max(ctx.measureText(keyName).width + 20, 60);
+            ctx.font = 'bold 14px monospace';
+            const bw = Math.max(ctx.measureText(keyName).width + 24, 60);
+            const bx = 470 - bw / 2;
+            ctx.fillStyle = selected ? 'rgba(255, 221, 0, 0.2)' : 'rgba(255, 255, 255, 0.1)';
+            ctx.fillRect(bx, y - 4, bw, 28);
+            ctx.fillStyle = selected ? '#ffdd00' : '#666';
+            ctx.fillRect(bx, y - 4, bw, 2);
+            ctx.fillRect(bx, y + 22, bw, 2);
+            ctx.fillRect(bx, y - 4, 2, 28);
+            ctx.fillRect(bx + bw - 2, y - 4, 2, 28);
+            drawPixelText(keyName, 470, y + 14, 14, selected ? playerColor : '#ccc');
+        }
+
+        // Edit hint for selected
+        if (selected && !isRebinding) {
+            ctx.fillStyle = '#888';
+            ctx.font = '9px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(T('enterChange'), 470, y + 30);
+        }
+    }
+
+    // Bottom hints
     const blink = Math.floor(Date.now() / 500) % 2;
+    drawPixelText(T('rebindHint'), canvas.width / 2, 420, 10, blink ? '#aaa' : '#666');
+}
 
-    // Mode 1: PvP
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-    ctx.fillRect(30, 424, 360, 32);
+function drawHowToPlay() {
+    // Full screen overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.92)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Title
+    drawPixelText(T('howToPlay'), canvas.width / 2, 45, 28, '#4ecdc4');
+
+    // Content box
+    const boxX = 80;
+    const boxW = 640;
+    ctx.fillStyle = 'rgba(20, 30, 50, 0.95)';
+    ctx.fillRect(boxX, 60, boxW, 440);
     ctx.fillStyle = '#4ecdc4';
-    ctx.fillRect(30, 424, 360, 2);
-    ctx.fillRect(30, 454, 360, 2);
-    drawPixelText('Press 1 for Player vs Player', 210, 446, 12, blink ? '#4ecdc4' : '#88ffee');
+    ctx.fillRect(boxX, 60, boxW, 2);
+    ctx.fillRect(boxX, 498, boxW, 2);
 
-    // Mode 2: PvE
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-    ctx.fillRect(410, 424, 360, 32);
+    ctx.textAlign = 'left';
+    const x = 110;
+    let y = 90;
+    const lineH = 19;
+
+    // Goal
+    ctx.fillStyle = '#ffdd00';
+    ctx.font = 'bold 13px monospace';
+    ctx.fillText(T('goalTitle'), x, y);
+    y += lineH;
+    ctx.fillStyle = '#ccc';
+    ctx.font = '11px monospace';
+    ctx.fillText(T('goal1'), x, y);
+    y += lineH;
+    ctx.fillText(T('goal2'), x, y);
+    y += lineH;
+    ctx.fillText(T('goal3'), x, y);
+    y += lineH * 1.4;
+
+    // Controls
+    ctx.fillStyle = '#ffdd00';
+    ctx.font = 'bold 13px monospace';
+    ctx.fillText(T('controlsTitle'), x, y);
+    ctx.fillStyle = '#888';
+    ctx.font = '10px monospace';
+    ctx.fillText(T('controlsDefault'), x + 90, y);
+    y += lineH;
+    ctx.fillStyle = '#4ecdc4';
+    ctx.font = '11px monospace';
+    ctx.fillText(T('p1Label'), x, y);
+    ctx.fillStyle = '#aaa';
+    ctx.fillText(T('p1Controls'), x + 85, y);
+    y += lineH;
     ctx.fillStyle = '#e94560';
-    ctx.fillRect(410, 424, 360, 2);
-    ctx.fillRect(410, 454, 360, 2);
-    drawPixelText('Press 2 for Player vs AI', 590, 446, 12, blink ? '#e94560' : '#ff8888');
+    ctx.fillText(T('p2Label'), x, y);
+    ctx.fillStyle = '#aaa';
+    ctx.fillText(T('p2Controls'), x + 85, y);
+    y += lineH;
+    ctx.fillStyle = '#888';
+    ctx.fillText(T('escMenu'), x, y);
+    y += lineH * 1.4;
+
+    // Mechanics
+    ctx.fillStyle = '#ffdd00';
+    ctx.font = 'bold 13px monospace';
+    ctx.fillText(T('mechTitle'), x, y);
+    y += lineH;
+    ctx.fillStyle = '#ccc';
+    ctx.font = '11px monospace';
+    ctx.fillText(T('mech1'), x, y);
+    y += lineH;
+    ctx.fillText(T('mech2'), x, y);
+    y += lineH;
+    ctx.fillText(T('mech3'), x, y);
+    y += lineH;
+    ctx.fillText(T('mech4'), x, y);
+    y += lineH;
+    ctx.fillText(T('mech5'), x, y);
+    y += lineH * 1.4;
+
+    // Power-ups
+    ctx.fillStyle = '#ffdd00';
+    ctx.font = 'bold 13px monospace';
+    ctx.fillText(T('puTitle'), x, y);
+    y += lineH + 2;
+
+    const puEntries = Object.values(POWERUP_TYPES);
+    for (const pu of puEntries) {
+        // Mini icon
+        ctx.fillStyle = pu.colorDark;
+        ctx.fillRect(x, y - 8, 12, 12);
+        ctx.fillStyle = pu.color;
+        ctx.fillRect(x, y - 8, 12, 2);
+        ctx.fillRect(x, y + 2, 12, 2);
+        ctx.fillRect(x, y - 8, 2, 12);
+        ctx.fillRect(x + 10, y - 8, 2, 12);
+        ctx.font = 'bold 8px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(pu.symbol, x + 6, y + 1);
+        ctx.textAlign = 'left';
+
+        ctx.fillStyle = pu.color;
+        ctx.font = 'bold 11px monospace';
+        ctx.fillText(pu.name, x + 20, y);
+        ctx.fillStyle = '#aaa';
+        ctx.font = '11px monospace';
+        ctx.fillText('- ' + pu.description, x + 130, y);
+        y += lineH;
+    }
+
+    // Close hint
+    const closeBlink = Math.floor(Date.now() / 500) % 2;
+    drawPixelText(T('closeHint'), canvas.width / 2, 520, 14, closeBlink ? '#4ecdc4' : '#2a8a80');
 }
 
 function drawGameOverScreen() {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Winner text with pulsing glow
+    const winsNeeded = Math.ceil(BEST_OF_OPTIONS[settings.bestOf] / 2);
+    const matchOver = roundWins.p1 >= winsNeeded || roundWins.p2 >= winsNeeded;
+    const totalRounds = BEST_OF_OPTIONS[settings.bestOf];
+
+    // Round score display
+    if (totalRounds > 1) {
+        drawPixelText(`${T('score')} ${roundWins.p1} - ${roundWins.p2}`, canvas.width / 2, 50, 16, '#ffffff');
+
+        // Round dots
+        const dotY = 60;
+        const dotSpacing = 18;
+        const totalDots = totalRounds;
+        const startX = canvas.width / 2 - (totalDots - 1) * dotSpacing / 2;
+        for (let i = 0; i < totalDots; i++) {
+            const dx = startX + i * dotSpacing;
+            let color = '#333';
+            if (i < roundWins.p1) color = player1.color;
+            else if (i >= totalDots - roundWins.p2) color = player2.color;
+            ctx.fillStyle = color;
+            ctx.fillRect(dx - 4, dotY, 8, 8);
+            ctx.fillStyle = '#000';
+            ctx.fillRect(dx - 4, dotY, 8, 1);
+        }
+    }
+
+    // Winner text
+    const headerText = matchOver ? `${winner.name} ${T('winsMatch')}` : `${winner.name} ${T('winsRound')}`;
+    const headerSize = totalRounds > 1 ? 28 : 38;
     const glowPulse = Math.sin(frameCount * 0.08) * 0.3 + 0.7;
     ctx.globalAlpha = 0.2 * glowPulse;
     ctx.fillStyle = winner.color;
-    ctx.font = 'bold 40px monospace';
+    ctx.font = `bold ${headerSize + 2}px monospace`;
     ctx.textAlign = 'center';
-    ctx.fillText(`${winner.name} wins!`, canvas.width / 2, 102);
+    ctx.fillText(headerText, canvas.width / 2, 102);
     ctx.globalAlpha = 1;
-    drawPixelText(`${winner.name} wins!`, canvas.width / 2, 100, 38, winner.color);
+    drawPixelText(headerText, canvas.width / 2, 100, headerSize, winner.color);
 
-    // Trophy pixel art
-    const trophyY = 120;
-    ctx.fillStyle = '#ffdd00';
-    ctx.fillRect(canvas.width / 2 - 12, trophyY, 24, 6);
-    ctx.fillRect(canvas.width / 2 - 8, trophyY + 6, 16, 12);
-    ctx.fillRect(canvas.width / 2 - 14, trophyY + 4, 4, 8);
-    ctx.fillRect(canvas.width / 2 + 10, trophyY + 4, 4, 8);
-    ctx.fillRect(canvas.width / 2 - 4, trophyY + 18, 8, 4);
-    ctx.fillRect(canvas.width / 2 - 8, trophyY + 22, 16, 4);
-    ctx.fillStyle = '#ffaa00';
-    ctx.fillRect(canvas.width / 2 - 4, trophyY + 8, 8, 6);
+    // Trophy (only for match wins)
+    if (matchOver || totalRounds === 1) {
+        const trophyY = 115;
+        ctx.fillStyle = '#ffdd00';
+        ctx.fillRect(canvas.width / 2 - 12, trophyY, 24, 6);
+        ctx.fillRect(canvas.width / 2 - 8, trophyY + 6, 16, 12);
+        ctx.fillRect(canvas.width / 2 - 14, trophyY + 4, 4, 8);
+        ctx.fillRect(canvas.width / 2 + 10, trophyY + 4, 4, 8);
+        ctx.fillRect(canvas.width / 2 - 4, trophyY + 18, 8, 4);
+        ctx.fillRect(canvas.width / 2 - 8, trophyY + 22, 16, 4);
+        ctx.fillStyle = '#ffaa00';
+        ctx.fillRect(canvas.width / 2 - 4, trophyY + 8, 8, 6);
+    }
 
     // --- Stats Panel ---
-    const panelY = 170;
+    const panelY = 155;
     const panelH = 200;
     ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
     ctx.fillRect(60, panelY, 680, panelH);
-    // Border
     ctx.fillStyle = '#444';
     ctx.fillRect(60, panelY, 680, 2);
     ctx.fillRect(60, panelY + panelH - 2, 680, 2);
 
-    drawPixelText('MATCH STATS', canvas.width / 2, panelY + 22, 16, '#ffffff');
+    drawPixelText(T('roundStats'), canvas.width / 2, panelY + 22, 16, '#ffffff');
 
     // Divider line
     ctx.fillStyle = '#333';
@@ -1849,7 +2931,7 @@ function drawGameOverScreen() {
     ctx.fillText(player2.name, col2X, panelY + 50);
 
     // Stats rows
-    const statLabels = ['Shots Fired', 'Hits', 'Accuracy', 'Damage Done', 'Power-Ups collected'];
+    const statLabels = [T('shotsFired'), T('hits'), T('accuracy'), T('damageDone'), T('puCollected')];
     const s1 = stats.p1;
     const s2 = stats.p2;
     const acc1 = s1.shotsFired > 0 ? Math.round((s1.hits / s1.shotsFired) * 100) : 0;
@@ -1860,18 +2942,13 @@ function drawGameOverScreen() {
     ctx.font = '11px monospace';
     for (let i = 0; i < statLabels.length; i++) {
         const rowY = panelY + 72 + i * 24;
-        // Label (center)
         ctx.fillStyle = '#888';
         ctx.textAlign = 'center';
         ctx.fillText(statLabels[i], canvas.width / 2, rowY);
-        // P1 value
         ctx.fillStyle = '#ddd';
-        ctx.textAlign = 'center';
         ctx.fillText('' + statVals1[i], col1X, rowY);
-        // P2 value
         ctx.fillText('' + statVals2[i], col2X, rowY);
 
-        // Highlight the better stat
         const v1 = parseFloat(statVals1[i]);
         const v2 = parseFloat(statVals2[i]);
         if (!isNaN(v1) && !isNaN(v2) && v1 !== v2) {
@@ -1882,7 +2959,12 @@ function drawGameOverScreen() {
         }
     }
 
-    drawPixelText('Press R to restart', canvas.width / 2, panelY + panelH + 20, 16, '#ffffff');
+    // Bottom prompt
+    if (matchOver) {
+        drawPixelText(T('pressRMenu'), canvas.width / 2, panelY + panelH + 20, 16, '#ffffff');
+    } else {
+        drawPixelText(`${T('pressRNext')} (${roundWins.p1} - ${roundWins.p2})`, canvas.width / 2, panelY + panelH + 20, 16, '#ffdd00');
+    }
 }
 
 // ============================================
@@ -1895,6 +2977,10 @@ function resetGame() {
     damageNumbers = [];
     powerups = [];
     lastPowerupSpawn = Date.now();
+    roundStartTime = Date.now();
+    suddenDeathActive = false;
+    ammoPickups = [];
+    lastAmmoSpawn = Date.now();
     gameState = 'playing';
     winner = null;
     loser = null;
@@ -1905,11 +2991,54 @@ function resetGame() {
     };
 }
 
+function updateSuddenDeath() {
+    const sdOption = SUDDEN_DEATH_OPTIONS[settings.suddenDeath];
+    if (sdOption.time === 0) return; // Off
+
+    const elapsed = (Date.now() - roundStartTime) / 1000;
+    const remaining = sdOption.time - elapsed;
+
+    if (remaining <= 0 && !suddenDeathActive) {
+        suddenDeathActive = true;
+    }
+
+    // In sudden death: both players take 1 damage per frame
+    if (suddenDeathActive) {
+        if (player1.hp > 0) player1.hp -= 0.5;
+        if (player2.hp > 0) player2.hp -= 0.5;
+        if (player1.hp < 0) player1.hp = 0;
+        if (player2.hp < 0) player2.hp = 0;
+    }
+}
+
+function drawRoundTimer() {
+    const sdOption = SUDDEN_DEATH_OPTIONS[settings.suddenDeath];
+    if (sdOption.time === 0) return;
+
+    const elapsed = (Date.now() - roundStartTime) / 1000;
+    const remaining = Math.max(0, sdOption.time - elapsed);
+
+    if (suddenDeathActive) {
+        // Flashing SUDDEN DEATH text
+        const flash = Math.floor(Date.now() / 250) % 2;
+        drawPixelText(T('suddenDeath'), canvas.width / 2, 30, 14, flash ? '#ff2244' : '#ff8800');
+    } else {
+        // Timer countdown
+        const secs = Math.ceil(remaining);
+        const color = secs <= 10 ? '#ff4444' : (secs <= 20 ? '#ffaa00' : '#ffffff');
+        drawPixelText(secs + 's', canvas.width / 2, 30, 14, color);
+    }
+}
+
 function gameLoop() {
     frameCount++;
 
     if (gameState === 'start') {
         drawStartScreen();
+    } else if (gameState === 'settings') {
+        drawSettingsScreen();
+    } else if (gameState === 'rebind') {
+        drawRebindScreen();
     } else if (gameState === 'playing') {
         if (gameMode === 'pve') {
             AI.update(player2, player1);
@@ -1917,6 +3046,8 @@ function gameLoop() {
         player1.update();
         player2.update();
         updatePowerups();
+        updateAmmoPickups();
+        updateSuddenDeath();
         checkBulletHits();
         checkWin();
         updateParticles();
@@ -1925,10 +3056,12 @@ function gameLoop() {
         drawBg();
         drawPlatforms();
         drawPowerups();
+        drawAmmoPickups();
         player1.draw();
         player2.draw();
         drawParticles();
         drawDamageNumbers();
+        drawRoundTimer();
     } else if (gameState === 'dying') {
         updateDeathAnimation();
         updateParticles();
