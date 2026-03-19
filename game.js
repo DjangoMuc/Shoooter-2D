@@ -63,13 +63,23 @@ const POWERUP_SPAWN_INTERVAL = 4000; // ms between spawns
 const POWERUP_SIZE = 18;
 
 // --- Game State ---
-let gameState = 'start';
+let gameState = 'start'; // 'start', 'playing', 'dying', 'gameover'
 let gameMode = null; // 'pvp' or 'pve'
 let winner = null;
+let loser = null;
+let deathTimer = 0;
+const DEATH_DURATION = 90; // frames (~1.5 seconds)
 let particles = [];
+let damageNumbers = [];
 let frameCount = 0;
 let powerups = [];
 let lastPowerupSpawn = 0;
+
+// --- Stats tracking ---
+let stats = {
+    p1: { shotsFired: 0, hits: 0, damageDone: 0, powerupsCollected: 0 },
+    p2: { shotsFired: 0, hits: 0, damageDone: 0, powerupsCollected: 0 },
+};
 
 // --- Input ---
 const keys = {};
@@ -89,7 +99,7 @@ window.addEventListener('keydown', (e) => {
     if (gameState === 'gameover' && e.code === 'KeyR') {
         resetGame(); // keeps current gameMode
     }
-    if ((gameState === 'playing' || gameState === 'gameover') && e.code === 'Escape') {
+    if ((gameState === 'playing' || gameState === 'gameover' || gameState === 'dying') && e.code === 'Escape') {
         // Clear AI virtual keys so they don't persist
         AI.reset();
         if (player2) {
@@ -540,12 +550,17 @@ class Player {
 
     applyPowerup(type) {
         const def = POWERUP_TYPES[type];
+        const cx = this.x + this.w / 2;
+        const cy = this.y + this.h / 2;
+        // Track stats
+        if (this === player1) stats.p1.powerupsCollected++;
+        else if (this === player2) stats.p2.powerupsCollected++;
         if (type === 'heal') {
             this.hp = Math.min(MAX_HP, this.hp + 40);
-            spawnParticles(this.x + this.w / 2, this.y + this.h / 2, '#44dd44', 12);
+            spawnCollectBurst(cx, cy, '#44dd44');
         } else {
             this.activePowerups[type] = Date.now() + def.duration;
-            spawnParticles(this.x + this.w / 2, this.y + this.h / 2, def.color, 10);
+            spawnCollectBurst(cx, cy, def.color);
         }
     }
 
@@ -558,7 +573,11 @@ class Player {
         }
         if (now - this.lastShot < cooldown) return;
         this.lastShot = now;
-        this.muzzleFlash = 4;
+        this.muzzleFlash = 6;
+
+        // Track stats
+        if (this === player1) stats.p1.shotsFired++;
+        else if (this === player2) stats.p2.shotsFired++;
 
         this.bullets.push({
             x: this.facing === 1 ? this.x + this.w + 4 : this.x - 14,
@@ -608,13 +627,27 @@ class Player {
         const gunOffsetY = this.y + 16;
         drawSprite(gunSprite, gunOffsetX, gunOffsetY, PX, flipX);
 
-        // Muzzle flash
+        // Muzzle flash (enhanced)
         if (this.muzzleFlash > 0) {
             const flashX = flipX ? gunOffsetX - 8 : gunOffsetX + 12;
+            const flashIntensity = this.muzzleFlash / 6;
+            // Outer glow
+            ctx.globalAlpha = 0.4 * flashIntensity;
+            ctx.fillStyle = '#ffaa00';
+            ctx.fillRect(flashX - 4, gunOffsetY - 6, 14, 12);
+            ctx.globalAlpha = 1;
+            // Bright core
             ctx.fillStyle = '#ffffff';
-            ctx.fillRect(flashX, gunOffsetY - 2, 6, 4);
+            ctx.fillRect(flashX, gunOffsetY - 2, 8, 5);
+            // Yellow edge
             ctx.fillStyle = '#ffdd00';
-            ctx.fillRect(flashX + (flipX ? -4 : 6), gunOffsetY - 1, 4, 2);
+            ctx.fillRect(flashX + (flipX ? -4 : 8), gunOffsetY - 1, 4, 3);
+            // Small sparks
+            if (this.muzzleFlash > 3) {
+                ctx.fillStyle = '#ffff88';
+                ctx.fillRect(flashX + (flipX ? -2 : 10), gunOffsetY - 4, 2, 2);
+                ctx.fillRect(flashX + (flipX ? -2 : 10), gunOffsetY + 4, 2, 2);
+            }
         }
 
         ctx.globalAlpha = 1;
@@ -690,6 +723,31 @@ class Player {
         ctx.fillRect(barX - 1, barY, 1, barH);
         ctx.fillRect(barX + barW, barY, 1, barH);
 
+        // Power-Up timer bars (below HP bar)
+        let puBarOffset = 0;
+        const now = Date.now();
+        for (const [type, expiry] of Object.entries(this.activePowerups)) {
+            if (now >= expiry) continue;
+            const def = POWERUP_TYPES[type];
+            const remaining = expiry - now;
+            const total = def.duration;
+            const ratio = remaining / total;
+            const puBarY = barY + barH + 3 + puBarOffset * 5;
+            // Background
+            ctx.fillStyle = '#1a1a2e';
+            ctx.fillRect(barX - 1, puBarY - 1, barW + 2, 4);
+            // Fill
+            ctx.fillStyle = def.color;
+            ctx.fillRect(barX, puBarY, barW * ratio, 2);
+            // Border
+            ctx.fillStyle = def.color;
+            ctx.globalAlpha = 0.5;
+            ctx.fillRect(barX, puBarY - 1, barW, 1);
+            ctx.fillRect(barX, puBarY + 2, barW, 1);
+            ctx.globalAlpha = 1;
+            puBarOffset++;
+        }
+
         // Name
         ctx.fillStyle = this.color;
         ctx.font = 'bold 10px monospace';
@@ -717,10 +775,23 @@ class Player {
         if (this.hasPowerup('invincible')) {
             // Deflect particles
             spawnParticles(this.x + this.w / 2, this.y + this.h / 2, '#ffdd00', 6);
+            damageNumbers.push({
+                x: this.x + this.w / 2 + (Math.random() - 0.5) * 20,
+                y: this.y - 10,
+                vy: -2.5,
+                text: 'BLOCKED',
+                color: '#ffdd00',
+                life: 35,
+                maxLife: 35,
+                size: 12,
+            });
             return;
         }
         this.hp -= amount;
         this.hitFlash = 10;
+        // Spawn damage number
+        const dmgColor = amount >= 30 ? '#ff4444' : '#ff8888';
+        spawnDamageNumber(this.x + this.w / 2, this.y - 10, amount, dmgColor);
         if (this.hp <= 0) this.hp = 0;
     }
 }
@@ -760,6 +831,75 @@ function drawParticles() {
         ctx.fillRect(Math.floor(p.x), Math.floor(p.y), Math.ceil(p.size), Math.ceil(p.size));
     }
     ctx.globalAlpha = 1;
+}
+
+// --- Damage Numbers ---
+function spawnDamageNumber(x, y, amount, color) {
+    damageNumbers.push({
+        x: x + (Math.random() - 0.5) * 20,
+        y,
+        vy: -2.5,
+        text: '-' + amount,
+        color,
+        life: 45,
+        maxLife: 45,
+        size: amount >= 30 ? 18 : 14,
+    });
+}
+
+function updateDamageNumbers() {
+    for (let i = damageNumbers.length - 1; i >= 0; i--) {
+        const d = damageNumbers[i];
+        d.y += d.vy;
+        d.vy += 0.02;
+        d.life--;
+        if (d.life <= 0) damageNumbers.splice(i, 1);
+    }
+}
+
+function drawDamageNumbers() {
+    for (const d of damageNumbers) {
+        const alpha = Math.min(1, d.life / 15);
+        const scale = d.life > d.maxLife - 5 ? 1.3 : 1;
+        ctx.globalAlpha = alpha;
+        ctx.font = `bold ${Math.floor(d.size * scale)}px monospace`;
+        ctx.textAlign = 'center';
+        // Shadow
+        ctx.fillStyle = '#000000';
+        ctx.fillText(d.text, d.x + 1, d.y + 1);
+        // Text
+        ctx.fillStyle = d.color;
+        ctx.fillText(d.text, d.x, d.y);
+    }
+    ctx.globalAlpha = 1;
+}
+
+// --- Power-Up collect burst ---
+function spawnCollectBurst(x, y, color) {
+    // Ring of particles outward
+    for (let i = 0; i < 16; i++) {
+        const angle = (i / 16) * Math.PI * 2;
+        particles.push({
+            x, y,
+            vx: Math.cos(angle) * 4,
+            vy: Math.sin(angle) * 4,
+            life: 20 + Math.random() * 10,
+            color,
+            size: 3,
+        });
+    }
+    // Sparkle upward
+    for (let i = 0; i < 8; i++) {
+        particles.push({
+            x: x + (Math.random() - 0.5) * 20,
+            y,
+            vx: (Math.random() - 0.5) * 2,
+            vy: -3 - Math.random() * 3,
+            life: 25 + Math.random() * 15,
+            color: '#ffffff',
+            size: 2,
+        });
+    }
 }
 
 // ============================================
@@ -1254,6 +1394,8 @@ function checkBulletHits() {
             b.y < player2.y + player2.h
         ) {
             player2.takeDamage(p1Damage);
+            stats.p1.hits++;
+            stats.p1.damageDone += p1Damage;
             spawnParticles(b.x, b.y, '#e94560', 10);
             spawnParticles(b.x, b.y, '#ff8888', 5);
             player1.bullets.splice(i, 1);
@@ -1269,6 +1411,8 @@ function checkBulletHits() {
             b.y < player1.y + player1.h
         ) {
             player1.takeDamage(p2Damage);
+            stats.p2.hits++;
+            stats.p2.damageDone += p2Damage;
             spawnParticles(b.x, b.y, '#4ecdc4', 10);
             spawnParticles(b.x, b.y, '#88ffee', 5);
             player2.bullets.splice(i, 1);
@@ -1278,17 +1422,105 @@ function checkBulletHits() {
 
 function checkWin() {
     if (player1.hp <= 0) {
-        gameState = 'gameover';
+        gameState = 'dying';
         winner = player2;
-        // Death explosion
-        spawnParticles(player1.x + player1.w / 2, player1.y + player1.h / 2, '#4ecdc4', 30);
-        spawnParticles(player1.x + player1.w / 2, player1.y + player1.h / 2, '#ffffff', 15);
+        loser = player1;
+        deathTimer = DEATH_DURATION;
     } else if (player2.hp <= 0) {
-        gameState = 'gameover';
+        gameState = 'dying';
         winner = player1;
-        spawnParticles(player2.x + player2.w / 2, player2.y + player2.h / 2, '#e94560', 30);
-        spawnParticles(player2.x + player2.w / 2, player2.y + player2.h / 2, '#ffffff', 15);
+        loser = player2;
+        deathTimer = DEATH_DURATION;
     }
+}
+
+function updateDeathAnimation() {
+    if (!loser) return;
+    deathTimer--;
+
+    const cx = loser.x + loser.w / 2;
+    const cy = loser.y + loser.h / 2;
+    const progress = 1 - deathTimer / DEATH_DURATION; // 0 -> 1
+
+    // Phase 1 (0-0.5): Rapid flashing, small sparks
+    if (progress < 0.5) {
+        if (frameCount % 3 === 0) {
+            spawnParticles(cx + (Math.random() - 0.5) * 30, cy + (Math.random() - 0.5) * 30, '#ffffff', 2);
+        }
+        if (frameCount % 6 === 0) {
+            spawnParticles(cx + (Math.random() - 0.5) * 20, cy + (Math.random() - 0.5) * 20, loser.color, 3);
+        }
+    }
+
+    // Phase 2 (0.5-0.8): Growing explosion, more particles
+    if (progress >= 0.5 && progress < 0.8) {
+        const intensity = (progress - 0.5) / 0.3;
+        if (frameCount % 2 === 0) {
+            const count = Math.floor(3 + intensity * 8);
+            spawnParticles(cx, cy, loser.color, count);
+            spawnParticles(cx, cy, '#ffffff', Math.floor(count / 2));
+        }
+    }
+
+    // Phase 3 (0.8): Final big explosion
+    if (deathTimer === Math.floor(DEATH_DURATION * 0.2)) {
+        // Big burst
+        for (let i = 0; i < 30; i++) {
+            const angle = (i / 30) * Math.PI * 2;
+            const speed = 3 + Math.random() * 5;
+            particles.push({
+                x: cx, y: cy,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed - 2,
+                life: 30 + Math.random() * 20,
+                color: i % 3 === 0 ? '#ffffff' : loser.color,
+                size: 3 + Math.random() * 3,
+            });
+        }
+        // Pixel debris
+        for (let i = 0; i < 15; i++) {
+            particles.push({
+                x: cx + (Math.random() - 0.5) * 30,
+                y: cy + (Math.random() - 0.5) * 40,
+                vx: (Math.random() - 0.5) * 8,
+                vy: -4 - Math.random() * 6,
+                life: 40 + Math.random() * 30,
+                color: i % 2 === 0 ? loser.color : '#ffdd00',
+                size: 2 + Math.random() * 4,
+            });
+        }
+    }
+
+    // Transition to gameover
+    if (deathTimer <= 0) {
+        gameState = 'gameover';
+    }
+}
+
+function drawDyingPlayer() {
+    if (!loser) return;
+    const progress = 1 - deathTimer / DEATH_DURATION;
+
+    // Phase 1: Rapid blink
+    if (progress < 0.5) {
+        if (Math.floor(frameCount / 2) % 2 === 0) {
+            ctx.globalAlpha = 0.3;
+        }
+        // Red tint flash
+        loser.draw();
+        ctx.globalAlpha = 0.3 * Math.sin(frameCount * 0.5);
+        ctx.fillStyle = '#ff0000';
+        ctx.fillRect(loser.x - 2, loser.y - 2, loser.w + 4, loser.h + 4);
+        ctx.globalAlpha = 1;
+    }
+    // Phase 2: Shrink and fade
+    else if (progress < 0.8) {
+        const fade = 1 - (progress - 0.5) / 0.3;
+        ctx.globalAlpha = fade;
+        loser.draw();
+        ctx.globalAlpha = 1;
+    }
+    // Phase 3: Gone (only particles remain)
 }
 
 // ============================================
@@ -1447,16 +1679,30 @@ function drawStartScreen() {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Title with shadow
-    drawPixelText('SHOOOTER 2D', canvas.width / 2, 100, 44, '#e94560');
+    // Title with pulsing glow effect
+    const pulse = Math.sin(frameCount * 0.05) * 0.3 + 0.7;
+    const titleSize = 44 + Math.sin(frameCount * 0.03) * 2;
+    // Glow layers
+    ctx.globalAlpha = 0.15 * pulse;
+    ctx.fillStyle = '#e94560';
+    ctx.font = `bold ${Math.floor(titleSize + 4)}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.fillText('SHOOOTER 2D', canvas.width / 2, 102);
+    ctx.globalAlpha = 0.1 * pulse;
+    ctx.fillText('SHOOOTER 2D', canvas.width / 2 + 1, 103);
+    ctx.globalAlpha = 1;
+    drawPixelText('SHOOOTER 2D', canvas.width / 2, 100, Math.floor(titleSize), '#e94560');
     drawPixelText('Choose your mode!', canvas.width / 2, 140, 14, '#ffffff');
 
-    // Draw mini player sprites on title screen
-    drawSprite(sprites1.idle[0], 180, 180, PX, false);
-    drawSprite(sprites1.gun, 180 + 30, 196, PX, false);
+    // Animated idle sprites on title screen (gentle bob)
+    const idleBob = Math.sin(frameCount * 0.06) * 2;
+    const p1Frame = sprites1.idle[0];
+    const p2Frame = sprites2.idle[0];
+    drawSprite(p1Frame, 180, 180 + idleBob, PX, false);
+    drawSprite(sprites1.gun, 180 + 30, 196 + idleBob, PX, false);
 
-    drawSprite(sprites2.idle[0], 570, 180, PX, true);
-    drawSprite(sprites2.gun, 570 - 10, 196, PX, true);
+    drawSprite(p2Frame, 570, 180 - idleBob, PX, true);
+    drawSprite(sprites2.gun, 570 - 10, 196 - idleBob, PX, true);
 
     // Controls boxes
     ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
@@ -1535,30 +1781,37 @@ function drawStartScreen() {
 
     // Mode 1: PvP
     ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-    ctx.fillRect(160, 424, 200, 32);
+    ctx.fillRect(30, 424, 360, 32);
     ctx.fillStyle = '#4ecdc4';
-    ctx.fillRect(160, 424, 200, 2);
-    ctx.fillRect(160, 454, 200, 2);
-    drawPixelText('1  vs Player', 260, 446, 14, blink ? '#4ecdc4' : '#88ffee');
+    ctx.fillRect(30, 424, 360, 2);
+    ctx.fillRect(30, 454, 360, 2);
+    drawPixelText('Press 1 for Player vs Player', 210, 446, 12, blink ? '#4ecdc4' : '#88ffee');
 
     // Mode 2: PvE
     ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-    ctx.fillRect(440, 424, 200, 32);
+    ctx.fillRect(410, 424, 360, 32);
     ctx.fillStyle = '#e94560';
-    ctx.fillRect(440, 424, 200, 2);
-    ctx.fillRect(440, 454, 200, 2);
-    drawPixelText('2  vs AI', 540, 446, 14, blink ? '#e94560' : '#ff8888');
+    ctx.fillRect(410, 424, 360, 2);
+    ctx.fillRect(410, 454, 360, 2);
+    drawPixelText('Press 2 for Player vs AI', 590, 446, 12, blink ? '#e94560' : '#ff8888');
 }
 
 function drawGameOverScreen() {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Winner text with glow
-    drawPixelText(`${winner.name} wins!`, canvas.width / 2, 210, 38, winner.color);
+    // Winner text with pulsing glow
+    const glowPulse = Math.sin(frameCount * 0.08) * 0.3 + 0.7;
+    ctx.globalAlpha = 0.2 * glowPulse;
+    ctx.fillStyle = winner.color;
+    ctx.font = 'bold 40px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${winner.name} wins!`, canvas.width / 2, 102);
+    ctx.globalAlpha = 1;
+    drawPixelText(`${winner.name} wins!`, canvas.width / 2, 100, 38, winner.color);
 
     // Trophy pixel art
-    const trophyY = 240;
+    const trophyY = 120;
     ctx.fillStyle = '#ffdd00';
     ctx.fillRect(canvas.width / 2 - 12, trophyY, 24, 6);
     ctx.fillRect(canvas.width / 2 - 8, trophyY + 6, 16, 12);
@@ -1569,7 +1822,67 @@ function drawGameOverScreen() {
     ctx.fillStyle = '#ffaa00';
     ctx.fillRect(canvas.width / 2 - 4, trophyY + 8, 8, 6);
 
-    drawPixelText('Press R to restart', canvas.width / 2, 300, 16, '#ffffff');
+    // --- Stats Panel ---
+    const panelY = 170;
+    const panelH = 200;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    ctx.fillRect(60, panelY, 680, panelH);
+    // Border
+    ctx.fillStyle = '#444';
+    ctx.fillRect(60, panelY, 680, 2);
+    ctx.fillRect(60, panelY + panelH - 2, 680, 2);
+
+    drawPixelText('MATCH STATS', canvas.width / 2, panelY + 22, 16, '#ffffff');
+
+    // Divider line
+    ctx.fillStyle = '#333';
+    ctx.fillRect(canvas.width / 2 - 1, panelY + 32, 2, panelH - 42);
+
+    // Column headers
+    const col1X = 220;
+    const col2X = 580;
+    ctx.font = 'bold 13px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = player1.color;
+    ctx.fillText(player1.name, col1X, panelY + 50);
+    ctx.fillStyle = player2.color;
+    ctx.fillText(player2.name, col2X, panelY + 50);
+
+    // Stats rows
+    const statLabels = ['Shots Fired', 'Hits', 'Accuracy', 'Damage Done', 'Power-Ups collected'];
+    const s1 = stats.p1;
+    const s2 = stats.p2;
+    const acc1 = s1.shotsFired > 0 ? Math.round((s1.hits / s1.shotsFired) * 100) : 0;
+    const acc2 = s2.shotsFired > 0 ? Math.round((s2.hits / s2.shotsFired) * 100) : 0;
+    const statVals1 = [s1.shotsFired, s1.hits, acc1 + '%', s1.damageDone, s1.powerupsCollected];
+    const statVals2 = [s2.shotsFired, s2.hits, acc2 + '%', s2.damageDone, s2.powerupsCollected];
+
+    ctx.font = '11px monospace';
+    for (let i = 0; i < statLabels.length; i++) {
+        const rowY = panelY + 72 + i * 24;
+        // Label (center)
+        ctx.fillStyle = '#888';
+        ctx.textAlign = 'center';
+        ctx.fillText(statLabels[i], canvas.width / 2, rowY);
+        // P1 value
+        ctx.fillStyle = '#ddd';
+        ctx.textAlign = 'center';
+        ctx.fillText('' + statVals1[i], col1X, rowY);
+        // P2 value
+        ctx.fillText('' + statVals2[i], col2X, rowY);
+
+        // Highlight the better stat
+        const v1 = parseFloat(statVals1[i]);
+        const v2 = parseFloat(statVals2[i]);
+        if (!isNaN(v1) && !isNaN(v2) && v1 !== v2) {
+            const betterX = v1 > v2 ? col1X : col2X;
+            const betterColor = v1 > v2 ? player1.color : player2.color;
+            ctx.fillStyle = betterColor;
+            ctx.fillText(v1 > v2 ? '' + statVals1[i] : '' + statVals2[i], betterX, rowY);
+        }
+    }
+
+    drawPixelText('Press R to restart', canvas.width / 2, panelY + panelH + 20, 16, '#ffffff');
 }
 
 // ============================================
@@ -1579,10 +1892,17 @@ function resetGame() {
     createPlayers();
     AI.reset();
     particles = [];
+    damageNumbers = [];
     powerups = [];
     lastPowerupSpawn = Date.now();
     gameState = 'playing';
     winner = null;
+    loser = null;
+    deathTimer = 0;
+    stats = {
+        p1: { shotsFired: 0, hits: 0, damageDone: 0, powerupsCollected: 0 },
+        p2: { shotsFired: 0, hits: 0, damageDone: 0, powerupsCollected: 0 },
+    };
 }
 
 function gameLoop() {
@@ -1600,6 +1920,7 @@ function gameLoop() {
         checkBulletHits();
         checkWin();
         updateParticles();
+        updateDamageNumbers();
 
         drawBg();
         drawPlatforms();
@@ -1607,13 +1928,29 @@ function gameLoop() {
         player1.draw();
         player2.draw();
         drawParticles();
+        drawDamageNumbers();
+    } else if (gameState === 'dying') {
+        updateDeathAnimation();
+        updateParticles();
+        updateDamageNumbers();
+
+        drawBg();
+        drawPlatforms();
+        // Draw the winner normally
+        if (winner === player1) { player1.draw(); } else { player2.draw(); }
+        // Draw the loser with death effect
+        drawDyingPlayer();
+        drawParticles();
+        drawDamageNumbers();
     } else if (gameState === 'gameover') {
         drawBg();
         drawPlatforms();
-        player1.draw();
-        player2.draw();
+        // Only draw the winner (loser has exploded)
+        if (winner === player1) { player1.draw(); } else { player2.draw(); }
         updateParticles();
+        updateDamageNumbers();
         drawParticles();
+        drawDamageNumbers();
         drawGameOverScreen();
     }
 
