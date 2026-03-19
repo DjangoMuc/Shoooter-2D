@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -la /Users/Aurel/Documents/Claude/Shoooter\\\\\\(2D\\\\\\)/)",
+      "mcp__Claude_Preview__preview_start"
+    ]
+  }
+}
