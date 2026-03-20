@@ -97,6 +97,10 @@ const settings = {
     ammoFreq: 1,     // index into AMMO_FREQ_OPTIONS (default Normal)
     p1Skin: 0,       // index into SKIN_OPTIONS (default Cyan)
     p2Skin: 1,       // index into SKIN_OPTIONS (default Red)
+    gameMode: 0,     // index into GAME_MODE_OPTIONS (0=Classic, 1=One Shot, 2=King of the Hill, 3=Tag)
+    tagWinRule: 0,   // 0 = not "it" at end wins, 1 = shortest time as "it" wins
+    tagDuration: 1,  // index into TAG_DURATION_OPTIONS (default 60s)
+    knockback: 1,    // index into KNOCKBACK_OPTIONS (default Normal)
 };
 const BEST_OF_OPTIONS = [1, 3, 5];
 const MODE_OPTIONS = ['Player vs Player', 'Player vs AI'];
@@ -127,7 +131,7 @@ const SUDDEN_DEATH_OPTIONS = [
 const DROP_THROUGH_OPTIONS = ['On', 'Off'];
 const INFINITE_AMMO_OPTIONS = ['On', 'Off'];
 const START_AMMO = 0;
-const AMMO_PICKUP_AMOUNT = 5;
+const AMMO_PICKUP_AMOUNT = 10;
 const AMMO_SPAWN_INTERVAL = 5000; // ms (default, overridden by setting)
 const AMMO_FREQ_OPTIONS = [
     { name: 'Slow', interval: 8000 },
@@ -136,6 +140,51 @@ const AMMO_FREQ_OPTIONS = [
     { name: 'Very Fast', interval: 1500 },
 ];
 const LANG_OPTIONS = ['English', 'Deutsch'];
+
+// --- Game Mode Options ---
+const GAME_MODE_OPTIONS = [
+    { name: 'Classic', nameDE: 'Klassisch', desc: 'Reduce HP to 0', descDE: 'HP auf 0 reduzieren' },
+    { name: 'One Shot', nameDE: 'Ein Schuss', desc: 'One hit = kill', descDE: 'Ein Treffer = Tod' },
+    { name: 'King of the Hill', nameDE: 'König des Hügels', desc: 'Hold the hill', descDE: 'Hügel halten' },
+    { name: 'Tag', nameDE: 'Fangen', desc: "Don't be it!", descDE: 'Nicht Fänger sein!' },
+];
+const TAG_WIN_RULE_OPTIONS = [
+    { name: 'Not It', nameDE: 'Nicht Fänger' },
+    { name: 'Least Time', nameDE: 'Kürzeste Zeit' },
+];
+const TAG_DURATION_OPTIONS = [
+    { name: '30s', time: 30 },
+    { name: '60s', time: 60 },
+    { name: '90s', time: 90 },
+    { name: '120s', time: 120 },
+];
+
+const KNOCKBACK_OPTIONS = [
+    { name: 'Off', nameDE: 'Aus', force: 0 },
+    { name: 'Light', nameDE: 'Leicht', force: 3 },
+    { name: 'Normal', nameDE: 'Normal', force: 6 },
+    { name: 'Heavy', nameDE: 'Stark', force: 14 },
+    { name: 'Extreme', nameDE: 'Extrem', force: 24 },
+];
+
+// --- Tag Mode State ---
+let tagState = {
+    tagger: null,         // reference to the player who is "it"
+    p1Time: 0,            // ms player1 was "it"
+    p2Time: 0,            // ms player2 was "it"
+    lastTagSwitch: 0,     // timestamp of last tag switch
+    roundEndTime: 0,      // when the round ends
+};
+
+// --- King of the Hill State ---
+let kothState = {
+    p1Score: 0,           // seconds player1 held the hill
+    p2Score: 0,           // seconds player2 held the hill
+    scoreToWin: 30,       // seconds needed to win
+    hillZone: null,       // { x, y, w, h } - the capture zone
+    currentHolder: null,  // who is on the hill
+    holdStart: 0,         // when current holder started holding
+};
 
 // --- Translations ---
 const TEXTS = {
@@ -159,6 +208,12 @@ const TEXTS = {
         lblSuddenDeath: 'SUDDEN DEATH', lblDropThrough: 'DROP-THROUGH', lblInfAmmo: 'INFINITE AMMO',
         lblAmmoFreq: 'AMMO SPAWN FREQ',
         lblP1Skin: 'P1 COLOR', lblP2Skin: 'P2 COLOR',
+        lblGameMode: 'GAME MODE', lblTagWinRule: 'TAG WIN RULE', lblTagDuration: 'TAG DURATION', lblKnockback: 'KNOCKBACK',
+        notIt: 'Not It', leastTime: 'Least Time', light: 'Light', extreme: 'Extreme',
+        classic: 'Classic', oneShot: 'One Shot', koth: 'King of the Hill', tag: 'Tag',
+        tagTagger: 'TAGGER', tagTime: 'Time as Tagger',
+        kothHold: 'HOLD THE HILL!', kothScore: 'Hill Score',
+        tagEnded: 'TIME UP!',
         bestOf: 'Best of ',
         slow: 'Slow', fast: 'Fast', veryFast: 'Very Fast',
         on: 'On', off: 'Off',
@@ -195,6 +250,10 @@ const TEXTS = {
         score: 'Score:', roundStats: 'ROUND STATS',
         shotsFired: 'Shots Fired', hits: 'Hits', accuracy: 'Accuracy',
         damageDone: 'Damage Done', puCollected: 'Power-Ups collected',
+        timeAsTagger: 'Time as Tagger', lastTagger: 'Last Tagger',
+        hillTime: 'Hill Time', hillScore: 'Hill Score',
+        deaths: 'Deaths',
+        yes: 'Yes', no: 'No',
         pressRMenu: 'Press R to return to menu',
         pressRNext: 'Press R for next round',
         suddenDeath: 'SUDDEN DEATH',
@@ -220,6 +279,12 @@ const TEXTS = {
         lblSuddenDeath: 'PL\u00d6TZL. TOD', lblDropThrough: 'DURCHFALLEN', lblInfAmmo: 'UNENDL. MUNITION',
         lblAmmoFreq: 'MUNI. SPAWN H\u00c4UFIGK.',
         lblP1Skin: 'S1 FARBE', lblP2Skin: 'S2 FARBE',
+        lblGameMode: 'SPIELMODUS', lblTagWinRule: 'FANGEN SIEGREGEL', lblTagDuration: 'FANGEN DAUER', lblKnockback: 'R\u00dcCKSTOSS',
+        notIt: 'Nicht F\u00e4nger', leastTime: 'K\u00fcrzeste Zeit', light: 'Leicht', extreme: 'Extrem',
+        classic: 'Klassisch', oneShot: 'Ein Schuss', koth: 'K\u00f6nig d. H\u00fcgels', tag: 'Fangen',
+        tagTagger: 'F\u00c4NGER', tagTime: 'Zeit als F\u00e4nger',
+        kothHold: 'HALTE DEN H\u00dcGEL!', kothScore: 'H\u00fcgel-Punkte',
+        tagEnded: 'ZEIT UM!',
         bestOf: 'Best of ',
         slow: 'Langsam', fast: 'Schnell', veryFast: 'Sehr schnell',
         on: 'An', off: 'Aus',
@@ -256,6 +321,10 @@ const TEXTS = {
         score: 'Punkte:', roundStats: 'RUNDENSTATISTIK',
         shotsFired: 'Sch\u00fcsse', hits: 'Treffer', accuracy: 'Genauigkeit',
         damageDone: 'Schaden', puCollected: 'Power-Ups gesammelt',
+        timeAsTagger: 'Zeit als F\u00e4nger', lastTagger: 'Letzter F\u00e4nger',
+        hillTime: 'Zeit auf H\u00fcgel', hillScore: 'H\u00fcgel-Punkte',
+        deaths: 'Tode',
+        yes: 'Ja', no: 'Nein',
         pressRMenu: 'R = Zur\u00fcck zum Men\u00fc',
         pressRNext: 'R = N\u00e4chste Runde',
         suddenDeath: 'PL\u00d6TZLICHER TOD',
@@ -270,6 +339,101 @@ function T(key) {
 
 // --- Settings Persistence (localStorage) ---
 const SETTINGS_KEY = 'shoooter2d_settings';
+
+// --- Dynamic Gameplay Settings (depends on selected game mode) ---
+function getGameplaySettingsItems() {
+    const gm = settings.gameMode;
+    const modeVal = settings.lang === 0 ? GAME_MODE_OPTIONS[gm].name : GAME_MODE_OPTIONS[gm].nameDE;
+    const pvpVal = settings.mode === 0 ? T('pvp') : T('pve');
+    const puVal = [T('off'), T('normal'), T('frequent'), T('chaos')][settings.puFreq];
+    const aiVal = [T('easy'), T('medium'), T('hard')][settings.aiDiff];
+    const gravVal = [T('moon'), T('normal'), T('heavy')][settings.gravity];
+    const sdVal = [T('off'), T('after30'), T('after60'), T('after90')][settings.suddenDeath];
+    const dtVal = settings.dropThrough === 0 ? T('on') : T('off');
+    const iaVal = settings.infiniteAmmo === 0 ? T('on') : T('off');
+    const ammoFVal = [T('slow'), T('normal'), T('fast'), T('veryFast')][settings.ammoFreq];
+
+    // Always-present items
+    const items = [
+        { key: 'gameMode', label: T('lblGameMode'), value: modeVal, hasArrows: true },
+        { key: 'mode', label: T('lblMode'), value: pvpVal, hasArrows: true },
+    ];
+
+    // Mode-specific items
+    if (gm === 3) {
+        // Tag mode: add tag-specific settings
+        const twrVal = settings.lang === 0 ? TAG_WIN_RULE_OPTIONS[settings.tagWinRule].name : TAG_WIN_RULE_OPTIONS[settings.tagWinRule].nameDE;
+        items.push({ key: 'tagWinRule', label: T('lblTagWinRule'), value: twrVal, hasArrows: true });
+        items.push({ key: 'tagDuration', label: T('lblTagDuration'), value: TAG_DURATION_OPTIONS[settings.tagDuration].name, hasArrows: true });
+    }
+
+    // Rounds (all modes)
+    items.push({ key: 'bestOf', label: T('lblRounds'), value: T('bestOf') + BEST_OF_OPTIONS[settings.bestOf], hasArrows: true });
+
+    if (gm === 0 || gm === 1) {
+        // Classic & One Shot: HP settings
+        items.push({ key: 'hp', label: T('lblMaxHp'), value: HP_OPTIONS[settings.hp] + ' HP', hasArrows: true });
+    }
+
+    // Common settings for all modes
+    items.push({ key: 'puFreq', label: T('lblPuFreq'), value: puVal, hasArrows: true });
+    items.push({ key: 'aiDiff', label: T('lblAiDiff'), value: aiVal, hasArrows: true });
+    items.push({ key: 'gravity', label: T('lblGravity'), value: gravVal, hasArrows: true });
+
+    if (gm === 0 || gm === 1) {
+        // Classic & One Shot: sudden death
+        items.push({ key: 'suddenDeath', label: T('lblSuddenDeath'), value: sdVal, hasArrows: true });
+    }
+
+    // Knockback for all modes except One Shot
+    if (gm !== 1) {
+        const kbOpt = KNOCKBACK_OPTIONS[settings.knockback];
+        const kbVal = settings.lang === 0 ? kbOpt.name : kbOpt.nameDE;
+        items.push({ key: 'knockback', label: T('lblKnockback'), value: kbVal, hasArrows: true });
+    }
+
+    items.push({ key: 'dropThrough', label: T('lblDropThrough'), value: dtVal, hasArrows: true });
+    items.push({ key: 'infiniteAmmo', label: T('lblInfAmmo'), value: iaVal, hasArrows: true });
+    items.push({ key: 'ammoFreq', label: T('lblAmmoFreq'), value: ammoFVal, hasArrows: true });
+
+    return items;
+}
+
+function handleGameplaySettingChange(key, dir) {
+    const cycle = (val, len) => (val + dir + len) % len;
+    switch (key) {
+        case 'gameMode': {
+            settings.gameMode = cycle(settings.gameMode, GAME_MODE_OPTIONS.length);
+            // Clamp map index to available maps for the new game mode
+            const avMapsForMode = getAvailableMaps();
+            if (settings.map >= avMapsForMode.length) settings.map = 0;
+            break;
+        }
+        case 'mode': settings.mode = cycle(settings.mode, MODE_OPTIONS.length); break;
+        case 'bestOf': settings.bestOf = cycle(settings.bestOf, BEST_OF_OPTIONS.length); break;
+        case 'hp': settings.hp = cycle(settings.hp, HP_OPTIONS.length); break;
+        case 'puFreq': settings.puFreq = cycle(settings.puFreq, PU_FREQ_OPTIONS.length); break;
+        case 'aiDiff': settings.aiDiff = cycle(settings.aiDiff, AI_DIFF_OPTIONS.length); break;
+        case 'gravity': settings.gravity = cycle(settings.gravity, GRAVITY_OPTIONS.length); break;
+        case 'suddenDeath': settings.suddenDeath = cycle(settings.suddenDeath, SUDDEN_DEATH_OPTIONS.length); break;
+        case 'dropThrough': settings.dropThrough = cycle(settings.dropThrough, DROP_THROUGH_OPTIONS.length); break;
+        case 'infiniteAmmo': settings.infiniteAmmo = cycle(settings.infiniteAmmo, INFINITE_AMMO_OPTIONS.length); break;
+        case 'ammoFreq': settings.ammoFreq = cycle(settings.ammoFreq, AMMO_FREQ_OPTIONS.length); break;
+        case 'tagWinRule': settings.tagWinRule = cycle(settings.tagWinRule, TAG_WIN_RULE_OPTIONS.length); break;
+        case 'tagDuration': settings.tagDuration = cycle(settings.tagDuration, TAG_DURATION_OPTIONS.length); break;
+        case 'knockback': settings.knockback = cycle(settings.knockback, KNOCKBACK_OPTIONS.length); break;
+    }
+}
+
+// Get available maps for current game mode
+function getAvailableMaps() {
+    if (settings.gameMode === 2) {
+        // King of the Hill: only the Summit map
+        return [KOTH_MAP_KEY];
+    }
+    // All other modes: the 4 standard maps
+    return MAP_KEYS.filter(k => k !== KOTH_MAP_KEY);
+}
 
 function saveSettings() {
     try {
@@ -313,6 +477,7 @@ loadSettings();
 // Settings menu state
 let settingsCategory = -1; // -1 = category select, 0 = system, 1 = gameplay
 let settingsCursor = 0;
+let settingsScroll = 0;   // scroll offset for gameplay settings
 const BG_THEMES = [
     {
         name: 'Night City',
@@ -392,8 +557,8 @@ function getKeyDisplayName(code) {
 
 // --- Stats tracking ---
 let stats = {
-    p1: { shotsFired: 0, hits: 0, damageDone: 0, powerupsCollected: 0 },
-    p2: { shotsFired: 0, hits: 0, damageDone: 0, powerupsCollected: 0 },
+    p1: { shotsFired: 0, hits: 0, damageDone: 0, powerupsCollected: 0, deaths: 0 },
+    p2: { shotsFired: 0, hits: 0, damageDone: 0, powerupsCollected: 0, deaths: 0 },
 };
 
 // --- Input ---
@@ -409,7 +574,9 @@ window.addEventListener('keydown', (e) => {
         if (e.code === 'Enter') {
             // Quick start with current settings
             gameMode = settings.mode === 0 ? 'pvp' : 'pve';
-            platforms = MAPS[MAP_KEYS[settings.map]].platforms;
+            const avMaps = getAvailableMaps();
+            const mapIdx = Math.min(settings.map, avMaps.length - 1);
+            platforms = MAPS[avMaps[mapIdx]].platforms;
             roundWins = { p1: 0, p2: 0 };
             prerenderBackground();
             resetGame();
@@ -437,6 +604,7 @@ window.addEventListener('keydown', (e) => {
             if (e.code === 'Enter' || e.code === 'Space') {
                 settingsCategory = settingsCursor;
                 settingsCursor = 0;
+                settingsScroll = 0;
             }
             if (e.code === 'KeyH') {
                 showHowToPlay = true;
@@ -454,7 +622,8 @@ window.addEventListener('keydown', (e) => {
                 settingsCursor = (settingsCursor + 1) % sysCount;
             }
             if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
-                if (settingsCursor === 0) settings.map = (settings.map - 1 + MAP_KEYS.length) % MAP_KEYS.length;
+                const avMaps = getAvailableMaps();
+                if (settingsCursor === 0) settings.map = (settings.map - 1 + avMaps.length) % avMaps.length;
                 if (settingsCursor === 1) { settings.bg = (settings.bg - 1 + BG_THEMES.length) % BG_THEMES.length; prerenderBackground(); }
                 if (settingsCursor === 2) settings.sound = (settings.sound - 1 + SOUND_OPTIONS.length) % SOUND_OPTIONS.length;
                 if (settingsCursor === 3) settings.lang = (settings.lang - 1 + LANG_OPTIONS.length) % LANG_OPTIONS.length;
@@ -463,7 +632,8 @@ window.addEventListener('keydown', (e) => {
                 saveSettings();
             }
             if (e.code === 'ArrowRight' || e.code === 'KeyD') {
-                if (settingsCursor === 0) settings.map = (settings.map + 1) % MAP_KEYS.length;
+                const avMaps = getAvailableMaps();
+                if (settingsCursor === 0) settings.map = (settings.map + 1) % avMaps.length;
                 if (settingsCursor === 1) { settings.bg = (settings.bg + 1) % BG_THEMES.length; prerenderBackground(); }
                 if (settingsCursor === 2) settings.sound = (settings.sound + 1) % SOUND_OPTIONS.length;
                 if (settingsCursor === 3) settings.lang = (settings.lang + 1) % LANG_OPTIONS.length;
@@ -485,50 +655,55 @@ window.addEventListener('keydown', (e) => {
                 settingsCursor = 0;
             }
         } else if (settingsCategory === 1) {
-            // Gameplay settings: Mode, Rounds, HP, Power-Up Freq, AI Difficulty, Gravity, Sudden Death, Drop-Through, Infinite Ammo
-            const gpCount = 10;
+            // Gameplay settings - dynamic based on game mode
+            const gpItems = getGameplaySettingsItems();
+            const gpCount = gpItems.length;
+            // Clamp cursor to valid range (items can change when gameMode changes)
+            if (settingsCursor >= gpCount) { settingsCursor = gpCount - 1; settingsScroll = Math.max(0, gpCount - Math.floor((460 - 78) / 48)); }
+            const maxVis = Math.floor((460 - 78) / 48); // must match drawSettingsOptions
             if (e.code === 'ArrowUp' || e.code === 'KeyW') {
                 settingsCursor = (settingsCursor - 1 + gpCount) % gpCount;
             }
             if (e.code === 'ArrowDown' || e.code === 'KeyS') {
                 settingsCursor = (settingsCursor + 1) % gpCount;
             }
+            // Auto-scroll to keep cursor visible
+            if (settingsCursor < settingsScroll) settingsScroll = settingsCursor;
+            if (settingsCursor >= settingsScroll + maxVis) settingsScroll = settingsCursor - maxVis + 1;
+            // Wrap-around: cursor jumps from last to first or vice versa
+            if (settingsCursor === 0 && settingsScroll > 0) settingsScroll = 0;
+            if (settingsCursor === gpCount - 1) settingsScroll = Math.max(0, gpCount - maxVis);
+
             if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
-                if (settingsCursor === 0) settings.mode = (settings.mode - 1 + MODE_OPTIONS.length) % MODE_OPTIONS.length;
-                if (settingsCursor === 1) settings.bestOf = (settings.bestOf - 1 + BEST_OF_OPTIONS.length) % BEST_OF_OPTIONS.length;
-                if (settingsCursor === 2) settings.hp = (settings.hp - 1 + HP_OPTIONS.length) % HP_OPTIONS.length;
-                if (settingsCursor === 3) settings.puFreq = (settings.puFreq - 1 + PU_FREQ_OPTIONS.length) % PU_FREQ_OPTIONS.length;
-                if (settingsCursor === 4) settings.aiDiff = (settings.aiDiff - 1 + AI_DIFF_OPTIONS.length) % AI_DIFF_OPTIONS.length;
-                if (settingsCursor === 5) settings.gravity = (settings.gravity - 1 + GRAVITY_OPTIONS.length) % GRAVITY_OPTIONS.length;
-                if (settingsCursor === 6) settings.suddenDeath = (settings.suddenDeath - 1 + SUDDEN_DEATH_OPTIONS.length) % SUDDEN_DEATH_OPTIONS.length;
-                if (settingsCursor === 7) settings.dropThrough = (settings.dropThrough - 1 + DROP_THROUGH_OPTIONS.length) % DROP_THROUGH_OPTIONS.length;
-                if (settingsCursor === 8) settings.infiniteAmmo = (settings.infiniteAmmo - 1 + INFINITE_AMMO_OPTIONS.length) % INFINITE_AMMO_OPTIONS.length;
-                if (settingsCursor === 9) settings.ammoFreq = (settings.ammoFreq - 1 + AMMO_FREQ_OPTIONS.length) % AMMO_FREQ_OPTIONS.length;
+                const item = gpItems[settingsCursor];
+                if (item) {
+                    handleGameplaySettingChange(item.key, -1);
+                    // Reset scroll when game mode changes (item list changes)
+                    if (item.key === 'gameMode') { settingsCursor = 0; settingsScroll = 0; }
+                }
                 saveSettings();
             }
             if (e.code === 'ArrowRight' || e.code === 'KeyD') {
-                if (settingsCursor === 0) settings.mode = (settings.mode + 1) % MODE_OPTIONS.length;
-                if (settingsCursor === 1) settings.bestOf = (settings.bestOf + 1) % BEST_OF_OPTIONS.length;
-                if (settingsCursor === 2) settings.hp = (settings.hp + 1) % HP_OPTIONS.length;
-                if (settingsCursor === 3) settings.puFreq = (settings.puFreq + 1) % PU_FREQ_OPTIONS.length;
-                if (settingsCursor === 4) settings.aiDiff = (settings.aiDiff + 1) % AI_DIFF_OPTIONS.length;
-                if (settingsCursor === 5) settings.gravity = (settings.gravity + 1) % GRAVITY_OPTIONS.length;
-                if (settingsCursor === 6) settings.suddenDeath = (settings.suddenDeath + 1) % SUDDEN_DEATH_OPTIONS.length;
-                if (settingsCursor === 7) settings.dropThrough = (settings.dropThrough + 1) % DROP_THROUGH_OPTIONS.length;
-                if (settingsCursor === 8) settings.infiniteAmmo = (settings.infiniteAmmo + 1) % INFINITE_AMMO_OPTIONS.length;
-                if (settingsCursor === 9) settings.ammoFreq = (settings.ammoFreq + 1) % AMMO_FREQ_OPTIONS.length;
+                const item = gpItems[settingsCursor];
+                if (item) {
+                    handleGameplaySettingChange(item.key, 1);
+                    if (item.key === 'gameMode') { settingsCursor = 0; settingsScroll = 0; }
+                }
                 saveSettings();
             }
             if (e.code === 'KeyH') { showHowToPlay = true; }
             if (e.code === 'Escape') {
                 settingsCategory = -1;
                 settingsCursor = 1;
+                settingsScroll = 0;
             }
         }
         // Start game from any settings sub-screen with F key
         if (!showHowToPlay && e.code === 'KeyF') {
             gameMode = settings.mode === 0 ? 'pvp' : 'pve';
-            platforms = MAPS[MAP_KEYS[settings.map]].platforms;
+            const avMaps = getAvailableMaps();
+            const mapIdx = Math.min(settings.map, avMaps.length - 1);
+            platforms = MAPS[avMaps[mapIdx]].platforms;
             roundWins = { p1: 0, p2: 0 };
             showHowToPlay = false;
             settingsCategory = -1;
@@ -599,7 +774,7 @@ window.addEventListener('keydown', (e) => {
     if (gameState === 'gameover' && e.code === 'KeyR') {
         const winsNeeded = Math.ceil(BEST_OF_OPTIONS[settings.bestOf] / 2);
         if (roundWins.p1 >= winsNeeded || roundWins.p2 >= winsNeeded) {
-            // Match is over, go back to start
+            // Match over, back to menu
             roundWins = { p1: 0, p2: 0 };
             gameState = 'start';
         } else {
@@ -956,8 +1131,29 @@ const MAPS = {
             { x: 640, y: 140, w: 60, h: 16 },
         ],
     },
+    koth_summit: {
+        name: 'Summit',
+        platforms: [
+            { x: 0, y: 470, w: 800, h: 30, isGround: true },
+            // Left side ascent
+            { x: 20, y: 390, w: 120, h: 16 },
+            { x: 160, y: 320, w: 100, h: 16 },
+            { x: 40, y: 250, w: 90, h: 16 },
+            // Right side ascent
+            { x: 660, y: 390, w: 120, h: 16 },
+            { x: 540, y: 320, w: 100, h: 16 },
+            { x: 670, y: 250, w: 90, h: 16 },
+            // Center hill / summit
+            { x: 280, y: 280, w: 240, h: 16 },
+            { x: 320, y: 180, w: 160, h: 16, isHill: true },  // THE HILL (capture zone)
+            // Side platforms for flanking
+            { x: 80, y: 160, w: 80, h: 16 },
+            { x: 640, y: 160, w: 80, h: 16 },
+        ],
+    },
 };
 const MAP_KEYS = Object.keys(MAPS);
+const KOTH_MAP_KEY = 'koth_summit';
 let platforms = MAPS.classic.platforms;
 
 // ============================================
@@ -990,6 +1186,7 @@ class Player {
         this.dropThrough = false; // falling through platform
         this.dropPlatform = null; // which platform to ignore
         this.ammo = START_AMMO; // ammo count (only used when infiniteAmmo is Off)
+        this.knockbackVx = 0; // horizontal knockback velocity (decays over time)
     }
 
     update() {
@@ -1004,6 +1201,11 @@ class Player {
             this.vx = PLAYER_SPEED;
             this.facing = 1;
         }
+
+        // Apply knockback (decays with friction)
+        this.vx += this.knockbackVx;
+        this.knockbackVx *= 0.85; // friction decay
+        if (Math.abs(this.knockbackVx) < 0.2) this.knockbackVx = 0;
 
         if (keys[this.controls.jump] && this.onGround) {
             // Scale jump force with gravity so jump height stays proportional
@@ -1600,15 +1802,40 @@ const AI = {
         this.wantsShoot = false;
         this.wantsDown = false;
 
+        // --- King of the Hill: special AI behavior ---
+        if (settings.gameMode === 2) {
+            this._updateKOTH(aiPlayer, humanPlayer);
+            this._applyInputs(aiPlayer);
+            return;
+        }
+
+        // --- Tag mode: special AI behavior ---
+        if (settings.gameMode === 3) {
+            this._updateTag(aiPlayer, humanPlayer);
+            this._applyInputs(aiPlayer);
+            return;
+        }
+
         const aiCX = aiPlayer.x + aiPlayer.w / 2;
         const aiCY = aiPlayer.y + aiPlayer.h / 2;
         const aiFeetY = aiPlayer.y + aiPlayer.h;
         const humanCX = humanPlayer.x + humanPlayer.w / 2;
         const humanCY = humanPlayer.y + humanPlayer.h / 2;
 
-        // --- Decide target: power-up first, then human ---
+        // --- Decide target: ammo (if needed) > power-up > human ---
         let targetX, targetY;
         let chasingPowerup = false;
+
+        // Prioritize ammo pickups when low on ammo
+        let closestAmmo = null;
+        let closestAmmoDist = Infinity;
+        if (settings.infiniteAmmo === 1 && aiPlayer.ammo <= 2) {
+            for (const ap of ammoPickups) {
+                if (ap.y < 200) continue; // ignore ammo on highest platforms
+                const d = Math.hypot(ap.x + ap.w / 2 - aiCX, ap.y + ap.h / 2 - aiCY);
+                if (d < closestAmmoDist) { closestAmmoDist = d; closestAmmo = ap; }
+            }
+        }
 
         let closestPU = null;
         let closestDist = Infinity;
@@ -1619,7 +1846,12 @@ const AI = {
             if (d < closestDist) { closestDist = d; closestPU = pu; }
         }
 
-        if (closestPU) {
+        // When out of ammo, prioritize ammo pickups over everything
+        if (closestAmmo && (aiPlayer.ammo <= 0 || !closestPU)) {
+            targetX = closestAmmo.x + closestAmmo.w / 2;
+            targetY = closestAmmo.y + closestAmmo.h / 2;
+            chasingPowerup = true;
+        } else if (closestPU) {
             targetX = closestPU.x + closestPU.w / 2;
             targetY = closestPU.y + closestPU.h / 2;
             chasingPowerup = true;
@@ -1717,6 +1949,356 @@ const AI = {
         this._dodgeBullets(aiPlayer, humanPlayer);
 
         this._applyInputs(aiPlayer);
+    },
+
+    // Tag AI: flee when not tagger, chase when tagger
+    _updateTag(aiPlayer, humanPlayer) {
+        const aiCX = aiPlayer.x + aiPlayer.w / 2;
+        const aiCY = aiPlayer.y + aiPlayer.h / 2;
+        const aiFeetY = aiPlayer.y + aiPlayer.h;
+        const humanCX = humanPlayer.x + humanPlayer.w / 2;
+        const humanCY = humanPlayer.y + humanPlayer.h / 2;
+        const dx = humanCX - aiCX;
+        const dy = humanCY - aiCY;
+        const dist = Math.hypot(dx, dy);
+
+        const isTagger = tagState.tagger === aiPlayer;
+
+        // --- Seek ammo pickups when low on ammo ---
+        if (settings.infiniteAmmo === 1 && aiPlayer.ammo <= 0 && ammoPickups.length > 0) {
+            let closestAmmo = null;
+            let closestAmmoDist = Infinity;
+            for (const ap of ammoPickups) {
+                if (ap.y < 200) continue; // ignore ammo on highest platforms
+                const d = Math.hypot(ap.x + ap.w / 2 - aiCX, ap.y + ap.h / 2 - aiCY);
+                if (d < closestAmmoDist) { closestAmmoDist = d; closestAmmo = ap; }
+            }
+            if (closestAmmo) {
+                const ammoX = closestAmmo.x + closestAmmo.w / 2;
+                const ammoY = closestAmmo.y + closestAmmo.h / 2;
+                const needsMultiClimb = ammoY < aiFeetY - this.JUMP_REACH;
+                const curPlat = this._getPlatformOf(aiPlayer);
+                const targetPlat = this._findPlatformAt(ammoX, ammoY);
+                const needsEdgeJump = !needsMultiClimb && curPlat && targetPlat &&
+                    curPlat !== targetPlat && ammoY < aiCY - 30;
+
+                if (needsMultiClimb || needsEdgeJump) {
+                    const targetKey = 'ammo_' + Math.round(ammoX / 40) + ',' + Math.round(ammoY / 40);
+                    if (this.pathTarget !== targetKey || (this.path.length === 0 && needsMultiClimb)) {
+                        this.path = needsMultiClimb ? this._buildPath(aiFeetY, ammoX, ammoY) : [];
+                        this.pathStep = 0;
+                        this.pathTarget = targetKey;
+                        this.stuckTimer = 0;
+                    }
+                    const oldStep = this.pathStep;
+                    if (this.pathStep < this.path.length) {
+                        if (curPlat === this.path[this.pathStep]) { this.pathStep++; this.stuckTimer = 0; }
+                    }
+                    if (oldStep === this.pathStep) this.stuckTimer++;
+                    if (this.stuckTimer > this.STUCK_LIMIT) {
+                        this.path = []; this.pathStep = 0; this.stuckTimer = 0;
+                        this.giveUpCooldown = 30;
+                    } else if (needsEdgeJump && this.path.length === 0 && targetPlat) {
+                        this._climbTo(aiPlayer, targetPlat, ammoX);
+                    } else if (this.pathStep < this.path.length) {
+                        this._climbTo(aiPlayer, this.path[this.pathStep], ammoX);
+                    } else {
+                        this._walkTo(aiPlayer, ammoX, ammoY);
+                    }
+                } else {
+                    this._walkTo(aiPlayer, ammoX, ammoY);
+                }
+                if (this.giveUpCooldown > 0) this.giveUpCooldown--;
+                this._dodgeBullets(aiPlayer, humanPlayer);
+                return; // prioritize ammo over tag behavior
+            }
+        }
+
+        if (isTagger) {
+            // AI IS THE TAGGER: chase the human aggressively
+            aiPlayer.facing = dx > 0 ? 1 : -1;
+
+            // Shoot to switch tagger via bullet
+            if (Math.abs(dy) < 60 && Math.random() < AI_DIFF_OPTIONS[settings.aiDiff].accuracy) {
+                this.wantsShoot = true;
+            }
+
+            // Chase: walk toward human
+            if (Math.abs(dx) > 15) {
+                if (dx > 0) this.wantsRight = true;
+                else this.wantsLeft = true;
+            }
+
+            // If human is above, climb toward them (reuse standard pathfinding)
+            if (humanCY < aiCY - 50) {
+                const targetKey = 'tag_chase_' + Math.round(humanCX / 40) + ',' + Math.round(humanCY / 40);
+                const needsMultiClimb = humanCY < aiFeetY - this.JUMP_REACH;
+                const curPlat = this._getPlatformOf(aiPlayer);
+                const targetPlat = this._findPlatformAt(humanCX, humanCY);
+                const needsEdgeJump = !needsMultiClimb && curPlat && targetPlat &&
+                    curPlat !== targetPlat && humanCY < aiCY - 30;
+
+                if ((needsMultiClimb || needsEdgeJump) && this.giveUpCooldown <= 0) {
+                    if (this.pathTarget !== targetKey || (this.path.length === 0 && needsMultiClimb)) {
+                        this.path = needsMultiClimb ? this._buildPath(aiFeetY, humanCX, humanCY) : [];
+                        this.pathStep = 0;
+                        this.pathTarget = targetKey;
+                        this.stuckTimer = 0;
+                    }
+                    const oldStep = this.pathStep;
+                    if (this.pathStep < this.path.length) {
+                        if (curPlat === this.path[this.pathStep]) { this.pathStep++; this.stuckTimer = 0; }
+                    }
+                    if (oldStep === this.pathStep) this.stuckTimer++;
+
+                    if (this.stuckTimer > this.STUCK_LIMIT) {
+                        this.path = []; this.pathStep = 0; this.stuckTimer = 0;
+                        this.giveUpCooldown = 60;
+                    } else if (needsEdgeJump && this.path.length === 0 && targetPlat) {
+                        this._climbTo(aiPlayer, targetPlat, humanCX);
+                    } else if (this.pathStep < this.path.length) {
+                        this._climbTo(aiPlayer, this.path[this.pathStep], humanCX);
+                    } else {
+                        this._walkTo(aiPlayer, humanCX, humanCY);
+                    }
+                } else if (this.giveUpCooldown <= 0) {
+                    this._walkTo(aiPlayer, humanCX, humanCY);
+                }
+            }
+
+            // If human is below, drop down
+            if (settings.dropThrough === 0 && humanCY > aiFeetY + 50 && aiPlayer.onGround) {
+                for (const p of platforms) {
+                    if (p.isGround) continue;
+                    if (aiPlayer.x + aiPlayer.w > p.x && aiPlayer.x < p.x + p.w && Math.abs(aiFeetY - p.y) < 3) {
+                        this.wantsDown = true;
+                        break;
+                    }
+                }
+            }
+        } else {
+            // AI IS NOT THE TAGGER: flee and evade!
+            aiPlayer.facing = dx > 0 ? 1 : -1;
+
+            // Shoot at human to switch tagger onto them
+            if (Math.abs(dy) < 60 && Math.random() < AI_DIFF_OPTIONS[settings.aiDiff].accuracy) {
+                this.wantsShoot = true;
+            }
+
+            // FLEE: run away from human
+            if (dist < 200) {
+                // Close: run in opposite direction
+                if (dx > 0) this.wantsLeft = true;
+                else this.wantsRight = true;
+
+                // Jump to evade if very close
+                if (dist < 100 && aiPlayer.onGround) {
+                    this.wantsJump = true;
+                }
+            } else if (dist < 350) {
+                // Medium distance: try to get to a different vertical level
+                const curPlat = this._getPlatformOf(aiPlayer);
+                const humanPlat = this._findPlatformAt(humanCX, humanCY + 20);
+                const samePlatform = curPlat && humanPlat && curPlat === humanPlat;
+                const sameLevel = Math.abs(aiCY - humanCY) < 40;
+
+                if (samePlatform || sameLevel) {
+                    // Same platform/level: jump to a different one
+                    // Find nearest platform that is NOT the human's platform
+                    let bestPlat = null;
+                    let bestDist = Infinity;
+                    for (const p of platforms) {
+                        if (p.isGround || p === curPlat) continue;
+                        const pCX = p.x + p.w / 2;
+                        const pCY = p.y;
+                        const dFromHuman = Math.hypot(pCX - humanCX, pCY - humanCY);
+                        const dFromAI = Math.hypot(pCX - aiCX, pCY - aiCY);
+                        // Prefer platforms far from human but reachable by AI
+                        if (dFromAI < 200 && dFromHuman > 150) {
+                            const score = dFromAI - dFromHuman * 0.5;
+                            if (score < bestDist) { bestDist = score; bestPlat = p; }
+                        }
+                    }
+
+                    if (bestPlat) {
+                        const platCX = bestPlat.x + bestPlat.w / 2;
+                        if (bestPlat.y < aiCY) {
+                            // Platform is above: climb to it
+                            this._climbTo(aiPlayer, bestPlat, platCX);
+                        } else if (settings.dropThrough === 0 && bestPlat.y > aiFeetY) {
+                            // Platform is below: drop through
+                            this.wantsDown = true;
+                        }
+                    } else {
+                        // No good platform found: just run away
+                        if (dx > 0) this.wantsLeft = true;
+                        else this.wantsRight = true;
+                    }
+                } else {
+                    // Different level: stay and maintain distance
+                    if (Math.random() < 0.05) {
+                        if (Math.random() < 0.5) this.wantsLeft = true;
+                        else this.wantsRight = true;
+                    }
+                }
+            }
+
+            // Near canvas edges: don't get cornered
+            if (aiCX < 60) this.wantsRight = true;
+            if (aiCX > canvas.width - 60) this.wantsLeft = true;
+        }
+
+        if (this.giveUpCooldown > 0) this.giveUpCooldown--;
+
+        // Always dodge bullets
+        this._dodgeBullets(aiPlayer, humanPlayer);
+    },
+
+    // KOTH AI: climb to the hill and hold it, shoot enemies off
+    _updateKOTH(aiPlayer, humanPlayer) {
+        const aiCX = aiPlayer.x + aiPlayer.w / 2;
+        const aiCY = aiPlayer.y + aiPlayer.h / 2;
+        const aiFeetY = aiPlayer.y + aiPlayer.h;
+        const humanCX = humanPlayer.x + humanPlayer.w / 2;
+        const humanCY = humanPlayer.y + humanPlayer.h / 2;
+
+        // Find the hill platform
+        const hillPlat = platforms.find(p => p.isHill);
+        if (!hillPlat) return;
+
+        const hillCX = hillPlat.x + hillPlat.w / 2;
+        const hillCY = hillPlat.y;
+
+        // --- Seek ammo pickups when out of ammo ---
+        if (settings.infiniteAmmo === 1 && aiPlayer.ammo <= 0 && ammoPickups.length > 0) {
+            let closestAmmo = null;
+            let closestAmmoDist = Infinity;
+            for (const ap of ammoPickups) {
+                if (ap.y < 200) continue; // ignore ammo on highest platforms
+                const d = Math.hypot(ap.x + ap.w / 2 - aiCX, ap.y + ap.h / 2 - aiCY);
+                if (d < closestAmmoDist) { closestAmmoDist = d; closestAmmo = ap; }
+            }
+            if (closestAmmo) {
+                const ammoX = closestAmmo.x + closestAmmo.w / 2;
+                const ammoY = closestAmmo.y + closestAmmo.h / 2;
+                const needsMultiClimb = ammoY < aiFeetY - this.JUMP_REACH;
+                const curPlat = this._getPlatformOf(aiPlayer);
+                const targetPlat = this._findPlatformAt(ammoX, ammoY);
+                const needsEdgeJump = !needsMultiClimb && curPlat && targetPlat &&
+                    curPlat !== targetPlat && ammoY < aiCY - 30;
+
+                if (needsMultiClimb || needsEdgeJump) {
+                    const targetKey = 'ammo_' + Math.round(ammoX / 40) + ',' + Math.round(ammoY / 40);
+                    if (this.pathTarget !== targetKey || (this.path.length === 0 && needsMultiClimb)) {
+                        this.path = needsMultiClimb ? this._buildPath(aiFeetY, ammoX, ammoY) : [];
+                        this.pathStep = 0;
+                        this.pathTarget = targetKey;
+                        this.stuckTimer = 0;
+                    }
+                    const oldStep = this.pathStep;
+                    if (this.pathStep < this.path.length) {
+                        if (curPlat === this.path[this.pathStep]) { this.pathStep++; this.stuckTimer = 0; }
+                    }
+                    if (oldStep === this.pathStep) this.stuckTimer++;
+                    if (this.stuckTimer > this.STUCK_LIMIT) {
+                        this.path = []; this.pathStep = 0; this.stuckTimer = 0;
+                        this.giveUpCooldown = 30;
+                    } else if (needsEdgeJump && this.path.length === 0 && targetPlat) {
+                        this._climbTo(aiPlayer, targetPlat, ammoX);
+                    } else if (this.pathStep < this.path.length) {
+                        this._climbTo(aiPlayer, this.path[this.pathStep], ammoX);
+                    } else {
+                        this._walkTo(aiPlayer, ammoX, ammoY);
+                    }
+                } else {
+                    this._walkTo(aiPlayer, ammoX, ammoY);
+                }
+                // Still shoot if aligned while going for ammo
+                if (Math.abs(humanCY - aiCY) < 60) {
+                    aiPlayer.facing = humanCX > aiCX ? 1 : -1;
+                }
+                if (this.giveUpCooldown > 0) this.giveUpCooldown--;
+                this._dodgeBullets(aiPlayer, humanPlayer);
+                return; // prioritize ammo over hill
+            }
+        }
+
+        // Check if AI is on the hill
+        const onHill = kothState.currentHolder === aiPlayer;
+
+        if (onHill) {
+            // ON THE HILL: stay centered, shoot at enemy
+            const dx = hillCX - aiCX;
+            if (Math.abs(dx) > 20) {
+                if (dx > 0) this.wantsRight = true;
+                else this.wantsLeft = true;
+            }
+
+            // Always face and shoot at enemy
+            aiPlayer.facing = humanCX > aiCX ? 1 : -1;
+            if (Math.random() < AI_DIFF_OPTIONS[settings.aiDiff].accuracy) {
+                this.wantsShoot = true;
+            }
+        } else {
+            // NOT ON HILL: pathfind to the hill platform
+            const targetX = hillCX;
+            const targetY = hillCY;
+            const needsMultiClimb = targetY < aiFeetY - this.JUMP_REACH;
+
+            // Decrement give-up cooldown
+            if (this.giveUpCooldown > 0) this.giveUpCooldown--;
+
+            const curPlat = this._getPlatformOf(aiPlayer);
+            const targetPlat = hillPlat;
+            const needsEdgeJump = !needsMultiClimb && curPlat && curPlat !== targetPlat && targetY < aiCY - 30;
+
+            if ((needsMultiClimb || needsEdgeJump) && this.giveUpCooldown <= 0) {
+                const targetKey = 'hill';
+                if (this.pathTarget !== targetKey || (this.path.length === 0 && needsMultiClimb)) {
+                    this.path = needsMultiClimb ? this._buildPath(aiFeetY, targetX, targetY) : [];
+                    this.pathStep = 0;
+                    this.pathTarget = targetKey;
+                    this.stuckTimer = 0;
+                }
+
+                const oldStep = this.pathStep;
+                if (this.pathStep < this.path.length) {
+                    if (curPlat === this.path[this.pathStep]) {
+                        this.pathStep++;
+                        this.stuckTimer = 0;
+                    }
+                }
+                if (oldStep === this.pathStep) this.stuckTimer++;
+
+                if (this.stuckTimer > this.STUCK_LIMIT) {
+                    this.path = [];
+                    this.pathStep = 0;
+                    this.stuckTimer = 0;
+                    this.giveUpCooldown = 60; // shorter cooldown, keep trying
+                } else if (needsEdgeJump && this.path.length === 0) {
+                    this._climbTo(aiPlayer, targetPlat, targetX);
+                } else if (this.pathStep < this.path.length) {
+                    this._climbTo(aiPlayer, this.path[this.pathStep], targetX);
+                } else {
+                    this._walkTo(aiPlayer, targetX, targetY);
+                }
+            } else {
+                this.path = [];
+                this.pathStep = 0;
+                this._walkTo(aiPlayer, targetX, targetY);
+            }
+
+            // Shoot at enemy if roughly aligned while climbing
+            if (Math.abs(humanCY - aiCY) < 60) {
+                aiPlayer.facing = humanCX > aiCX ? 1 : -1;
+                if (Math.random() < AI_DIFF_OPTIONS[settings.aiDiff].accuracy * 0.5) {
+                    this.wantsShoot = true;
+                }
+            }
+        }
+
+        // Dodge bullets even in KOTH
+        this._dodgeBullets(aiPlayer, humanPlayer);
     },
 
     // Climb to a platform: walk toward it, jump, steer mid-air
@@ -1884,7 +2466,10 @@ function createPlayers() {
 // POWER-UPS
 // ============================================
 function spawnPowerup() {
-    const types = Object.keys(POWERUP_TYPES);
+    let types = Object.keys(POWERUP_TYPES);
+    // One Shot mode: no heal powerups
+    if (settings.gameMode === 1) types = types.filter(t => t !== 'heal');
+    if (types.length === 0) return;
     const type = types[Math.floor(Math.random() * types.length)];
     // Pick a random platform (not ground)
     const plats = platforms.filter(p => !p.isGround);
@@ -2094,11 +2679,22 @@ function checkBulletHits() {
             b.y < player2.y + player2.h
         ) {
             player2.takeDamage(p1Damage);
+            // Apply knockback
+            const kb1 = KNOCKBACK_OPTIONS[settings.knockback].force;
+            if (kb1 > 0) {
+                player2.knockbackVx += (b.vx > 0 ? 1 : -1) * kb1;
+                player2.vy -= kb1 * 0.5;
+            }
             stats.p1.hits++;
             stats.p1.damageDone += p1Damage;
             spawnParticles(b.x, b.y, player2.color, 10);
             spawnParticles(b.x, b.y, '#ff8888', 5);
             player1.bullets.splice(i, 1);
+            // Tag mode: bullet hit switches tagger
+            if (settings.gameMode === 3 && tagState.tagger === player1 && Date.now() - (tagState.lastSwitch || 0) > 500) {
+                tagState.tagger = player2;
+                tagState.lastSwitch = Date.now();
+            }
         }
     }
 
@@ -2111,29 +2707,269 @@ function checkBulletHits() {
             b.y < player1.y + player1.h
         ) {
             player1.takeDamage(p2Damage);
+            // Apply knockback
+            const kb2 = KNOCKBACK_OPTIONS[settings.knockback].force;
+            if (kb2 > 0) {
+                player1.knockbackVx += (b.vx > 0 ? 1 : -1) * kb2;
+                player1.vy -= kb2 * 0.5;
+            }
             stats.p2.hits++;
             stats.p2.damageDone += p2Damage;
             spawnParticles(b.x, b.y, player1.color, 10);
             spawnParticles(b.x, b.y, '#88ffee', 5);
             player2.bullets.splice(i, 1);
+            // Tag mode: bullet hit switches tagger
+            if (settings.gameMode === 3 && tagState.tagger === player2 && Date.now() - (tagState.lastSwitch || 0) > 500) {
+                tagState.tagger = player1;
+                tagState.lastSwitch = Date.now();
+            }
         }
     }
 }
 
 function checkWin() {
-    if (player1.hp <= 0) {
-        gameState = 'dying';
-        winner = player2;
-        loser = player1;
-        deathTimer = DEATH_DURATION;
-        roundWins.p2++;
-    } else if (player2.hp <= 0) {
-        gameState = 'dying';
-        winner = player1;
-        loser = player2;
-        deathTimer = DEATH_DURATION;
-        roundWins.p1++;
+    const gm = settings.gameMode;
+
+    // Classic (0) and One Shot (1): HP-based win
+    if (gm === 0 || gm === 1) {
+        const p1Dead = player1.hp <= 0;
+        const p2Dead = player2.hp <= 0;
+        if (p1Dead && p2Dead) {
+            // Both die simultaneously: whoever has more HP remaining wins (or P2 if truly tied)
+            gameState = 'dying';
+            if (player1.hp > player2.hp) {
+                winner = player1; loser = player2; roundWins.p1++;
+            } else {
+                winner = player2; loser = player1; roundWins.p2++;
+            }
+            deathTimer = DEATH_DURATION;
+        } else if (p1Dead) {
+            gameState = 'dying';
+            winner = player2;
+            loser = player1;
+            deathTimer = DEATH_DURATION;
+            roundWins.p2++;
+        } else if (p2Dead) {
+            gameState = 'dying';
+            winner = player1;
+            loser = player2;
+            deathTimer = DEATH_DURATION;
+            roundWins.p1++;
+        }
     }
+
+    // King of the Hill (2): score-based win
+    if (gm === 2) {
+        if (kothState.p1Score >= kothState.scoreToWin) {
+            gameState = 'gameover';
+            winner = player1;
+            loser = player2;
+            roundWins.p1++;
+        } else if (kothState.p2Score >= kothState.scoreToWin) {
+            gameState = 'gameover';
+            winner = player2;
+            loser = player1;
+            roundWins.p2++;
+        }
+        // Also check HP death (respawn in KOTH instead of game over)
+        if (player1.hp <= 0) {
+            stats.p1.deaths++;
+            player1.hp = HP_OPTIONS[settings.hp];
+            player1.x = 100;
+            player1.y = 400;
+            player1.vx = 0;
+            player1.vy = 0;
+            player1.knockbackVx = 0;
+            spawnParticles(player1.x + 16, player1.y + 20, player1.color, 15);
+        }
+        if (player2.hp <= 0) {
+            stats.p2.deaths++;
+            player2.hp = HP_OPTIONS[settings.hp];
+            player2.x = 650;
+            player2.y = 400;
+            player2.vx = 0;
+            player2.vy = 0;
+            player2.knockbackVx = 0;
+            spawnParticles(player2.x + 16, player2.y + 20, player2.color, 15);
+            // Reset AI pathfinding so it replans from new position
+            if (gameMode === 'pve') {
+                AI.path = [];
+                AI.pathStep = 0;
+                AI.pathTarget = null;
+                AI.stuckTimer = 0;
+                AI.giveUpCooldown = 10; // small delay before replanning
+            }
+        }
+    }
+
+    // Tag (3): time-based win
+    if (gm === 3) {
+        const now = Date.now();
+        // Update tagger time
+        if (tagState.tagger === player1) {
+            tagState.p1Time += now - tagState.lastTagSwitch;
+        } else {
+            tagState.p2Time += now - tagState.lastTagSwitch;
+        }
+        tagState.lastTagSwitch = now;
+
+        // Check tag (players touching each other) - with debounce
+        const touching = player1.x + player1.w > player2.x &&
+                         player1.x < player2.x + player2.w &&
+                         player1.y + player1.h > player2.y &&
+                         player1.y < player2.y + player2.h;
+        if (touching && now - (tagState.lastSwitch || 0) > 500) {
+            // Switch tagger (500ms cooldown to prevent rapid switching)
+            tagState.tagger = tagState.tagger === player1 ? player2 : player1;
+            tagState.lastSwitch = now;
+        }
+
+        // Check time up
+        if (now >= tagState.roundEndTime) {
+            if (settings.tagWinRule === 0) {
+                // "Not It" wins: whoever is NOT the tagger wins
+                winner = tagState.tagger === player1 ? player2 : player1;
+                loser = tagState.tagger;
+            } else {
+                // "Least Time" wins
+                winner = tagState.p1Time <= tagState.p2Time ? player1 : player2;
+                loser = winner === player1 ? player2 : player1;
+            }
+            roundWins[winner === player1 ? 'p1' : 'p2']++;
+            gameState = 'gameover';
+        }
+
+        // Respawn on death in tag mode
+        if (player1.hp <= 0) {
+            stats.p1.deaths++;
+            player1.hp = HP_OPTIONS[settings.hp];
+            player1.x = 100;
+            player1.y = 400;
+            player1.vx = 0;
+            player1.vy = 0;
+            player1.knockbackVx = 0;
+        }
+        if (player2.hp <= 0) {
+            stats.p2.deaths++;
+            player2.hp = HP_OPTIONS[settings.hp];
+            player2.x = 650;
+            player2.y = 400;
+            player2.vx = 0;
+            player2.vy = 0;
+            player2.knockbackVx = 0;
+            // Reset AI pathfinding so it replans from new position
+            if (gameMode === 'pve') {
+                AI.path = [];
+                AI.pathStep = 0;
+                AI.pathTarget = null;
+                AI.stuckTimer = 0;
+                AI.giveUpCooldown = 10;
+            }
+        }
+    }
+}
+
+// --- King of the Hill Update ---
+function updateKOTH() {
+    if (settings.gameMode !== 2 || !kothState.hillZone) return;
+    const hz = kothState.hillZone;
+
+    // Check who is on the hill
+    const p1OnHill = player1.x + player1.w > hz.x && player1.x < hz.x + hz.w &&
+                     player1.y + player1.h > hz.y && player1.y < hz.y + hz.h;
+    const p2OnHill = player2.x + player2.w > hz.x && player2.x < hz.x + hz.w &&
+                     player2.y + player2.h > hz.y && player2.y < hz.y + hz.h;
+
+    if (p1OnHill && !p2OnHill) {
+        kothState.currentHolder = player1;
+        kothState.p1Score += 1 / 60; // ~1 point per second at 60fps
+    } else if (p2OnHill && !p1OnHill) {
+        kothState.currentHolder = player2;
+        kothState.p2Score += 1 / 60;
+    } else {
+        kothState.currentHolder = null; // contested or empty
+    }
+}
+
+// --- Draw KOTH HUD ---
+function drawKOTHHud() {
+    if (settings.gameMode !== 2 || !kothState.hillZone) return;
+    const hz = kothState.hillZone;
+
+    // Draw hill zone indicator
+    const pulse = Math.sin(Date.now() / 300) * 0.15 + 0.25;
+    let zoneColor = 'rgba(255, 255, 255, ' + pulse + ')';
+    if (kothState.currentHolder === player1) zoneColor = 'rgba(78, 205, 196, ' + (pulse + 0.1) + ')';
+    if (kothState.currentHolder === player2) zoneColor = 'rgba(233, 69, 96, ' + (pulse + 0.1) + ')';
+
+    ctx.fillStyle = zoneColor;
+    ctx.fillRect(hz.x, hz.y, hz.w, hz.h);
+    // Zone border
+    ctx.fillStyle = kothState.currentHolder ? kothState.currentHolder.color : '#666';
+    ctx.fillRect(hz.x, hz.y, hz.w, 2);
+    ctx.fillRect(hz.x, hz.y + hz.h - 2, hz.w, 2);
+    ctx.fillRect(hz.x, hz.y, 2, hz.h);
+    ctx.fillRect(hz.x + hz.w - 2, hz.y, 2, hz.h);
+
+    // Crown icon on the hill
+    const crownX = hz.x + hz.w / 2;
+    const crownY = hz.y + 10;
+    const crownBob = Math.sin(Date.now() / 500) * 2;
+    drawPixelText('\u265A', crownX, crownY + crownBob, 16, '#ffdd00');
+
+    // Score bars at top
+    const barW = 150;
+    const barH = 16;
+    const maxScore = kothState.scoreToWin;
+
+    // P1 score (left)
+    const p1Ratio = Math.min(1, kothState.p1Score / maxScore);
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(20, 10, barW + 2, barH + 2);
+    ctx.fillStyle = SKIN_OPTIONS[settings.p1Skin].primary;
+    ctx.fillRect(21, 11, barW * p1Ratio, barH);
+    drawPixelText(Math.floor(kothState.p1Score) + '/' + maxScore, 20 + barW / 2, 12 + barH / 2 + 2, 10, '#fff');
+
+    // P2 score (right)
+    const p2Ratio = Math.min(1, kothState.p2Score / maxScore);
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(canvas.width - barW - 22, 10, barW + 2, barH + 2);
+    ctx.fillStyle = SKIN_OPTIONS[settings.p2Skin].primary;
+    ctx.fillRect(canvas.width - barW - 21, 11, barW * p2Ratio, barH);
+    drawPixelText(Math.floor(kothState.p2Score) + '/' + maxScore, canvas.width - 22 - barW / 2, 12 + barH / 2 + 2, 10, '#fff');
+
+    // "HOLD THE HILL" text
+    drawPixelText(T('kothHold'), canvas.width / 2, 22, 12, '#ffdd00');
+}
+
+// --- Draw Tag HUD ---
+function drawTagHud() {
+    if (settings.gameMode !== 3) return;
+    const now = Date.now();
+    const remaining = Math.max(0, (tagState.roundEndTime - now) / 1000);
+    const secs = Math.ceil(remaining);
+
+    // Timer
+    const timerColor = secs <= 10 ? '#ff4444' : (secs <= 20 ? '#ffaa00' : '#ffffff');
+    drawPixelText(secs + 's', canvas.width / 2, 22, 16, timerColor);
+
+    // Tagger indicator - glow around the tagger
+    if (tagState.tagger) {
+        const t = tagState.tagger;
+        const pulse = Math.sin(Date.now() / 150) * 0.3 + 0.5;
+        ctx.fillStyle = `rgba(255, 50, 50, ${pulse})`;
+        ctx.fillRect(t.x - 4, t.y - 4, t.w + 8, t.h + 8);
+        // "TAGGER" label above
+        drawPixelText(T('tagTagger'), t.x + t.w / 2, t.y - 24, 8, '#ff4444');
+    }
+
+    // Time as tagger display
+    const p1Secs = Math.floor(tagState.p1Time / 1000);
+    const p2Secs = Math.floor(tagState.p2Time / 1000);
+    const p1C = SKIN_OPTIONS[settings.p1Skin].primary;
+    const p2C = SKIN_OPTIONS[settings.p2Skin].primary;
+    drawPixelText(p1Secs + 's', 60, 22, 12, p1C);
+    drawPixelText(p2Secs + 's', canvas.width - 60, 22, 12, p2C);
 }
 
 function updateDeathAnimation() {
@@ -2556,8 +3392,10 @@ function drawSettingsScreen() {
         const skinLang = settings.lang === 0 ? 'name' : 'nameDE';
         const p1SkinName = SKIN_OPTIONS[settings.p1Skin][skinLang];
         const p2SkinName = SKIN_OPTIONS[settings.p2Skin][skinLang];
+        const avMaps = getAvailableMaps();
+        const mapIdx = Math.min(settings.map, avMaps.length - 1);
         const options = [
-            { label: T('lblMap'), value: MAPS[MAP_KEYS[settings.map]].name, hasArrows: true },
+            { label: T('lblMap'), value: MAPS[avMaps[mapIdx]].name, hasArrows: true },
             { label: T('lblBg'), value: BG_THEMES[settings.bg].name, hasArrows: true },
             { label: T('lblSound'), value: soundVal, hasArrows: true },
             { label: T('lblLang'), value: LANG_OPTIONS[settings.lang], hasArrows: true },
@@ -2569,8 +3407,8 @@ function drawSettingsScreen() {
         drawSettingsOptions(options, 78);
 
         // Skin color preview swatches next to P1/P2 COLOR options
-        const spacing = options.length > 9 ? 40 : (options.length > 7 ? 44 : (options.length > 5 ? 48 : 52));
-        const boxH = options.length > 9 ? 30 : (options.length > 7 ? 34 : (options.length > 5 ? 36 : 40));
+        const spacing = 48;
+        const boxH = 36;
         for (let si = 4; si <= 5; si++) {
             const skinIdx = si === 4 ? settings.p1Skin : settings.p2Skin;
             const skin = SKIN_OPTIONS[skinIdx];
@@ -2595,7 +3433,7 @@ function drawSettingsScreen() {
         }
 
         // Map preview
-        const previewY = 78 + 7 * spacing + 8;
+        const previewY = 78 + options.length * spacing + 8;
         ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
         ctx.fillRect(150, previewY, 500, 50);
         ctx.fillStyle = '#444';
@@ -2603,9 +3441,10 @@ function drawSettingsScreen() {
         ctx.fillRect(150, previewY + 48, 500, 2);
         drawPixelText(T('mapPreview'), canvas.width / 2, previewY + 11, 9, '#888');
 
-        const previewMap = MAPS[MAP_KEYS[settings.map]].platforms;
-        const scale = 0.09;
-        const offsetX = 210;
+        const previewMap = MAPS[avMaps[mapIdx]].platforms;
+        const isLargeMap = previewMap.some(p => p.x + p.w > 850 || p.y + p.h > 500);
+        const scale = isLargeMap ? 0.07 : 0.09;
+        const offsetX = isLargeMap ? 220 : 210;
         const offsetY = previewY - 22;
         for (const p of previewMap) {
             ctx.fillStyle = p.isGround ? '#8b6914' : '#7755aa';
@@ -2631,36 +3470,21 @@ function drawSettingsScreen() {
         drawPixelText(T('pressH'), canvas.width / 2, 496, 9, '#4ecdc4');
 
     } else if (settingsCategory === 1) {
-        // --- Gameplay Settings ---
+        // --- Gameplay Settings (dynamic based on game mode) ---
         drawPixelText(T('gameplay'), canvas.width / 2, 60, 28, '#e94560');
 
-        const modeVal = settings.mode === 0 ? T('pvp') : T('pve');
-        const puVal = [T('off'), T('normal'), T('frequent'), T('chaos')][settings.puFreq];
-        const aiVal = [T('easy'), T('medium'), T('hard')][settings.aiDiff];
-        const gravVal = [T('moon'), T('normal'), T('heavy')][settings.gravity];
-        const sdVal = [T('off'), T('after30'), T('after60'), T('after90')][settings.suddenDeath];
-        const dtVal = settings.dropThrough === 0 ? T('on') : T('off');
-        const iaVal = settings.infiniteAmmo === 0 ? T('on') : T('off');
-        const ammoFVal = [T('slow'), T('normal'), T('fast'), T('veryFast')][settings.ammoFreq];
+        const gpItems = getGameplaySettingsItems();
+        const options = gpItems.map(item => ({ label: item.label, value: item.value, hasArrows: item.hasArrows }));
 
-        const options = [
-            { label: T('lblMode'), value: modeVal, hasArrows: true },
-            { label: T('lblRounds'), value: T('bestOf') + BEST_OF_OPTIONS[settings.bestOf], hasArrows: true },
-            { label: T('lblMaxHp'), value: HP_OPTIONS[settings.hp] + ' HP', hasArrows: true },
-            { label: T('lblPuFreq'), value: puVal, hasArrows: true },
-            { label: T('lblAiDiff'), value: aiVal, hasArrows: true },
-            { label: T('lblGravity'), value: gravVal, hasArrows: true },
-            { label: T('lblSuddenDeath'), value: sdVal, hasArrows: true },
-            { label: T('lblDropThrough'), value: dtVal, hasArrows: true },
-            { label: T('lblInfAmmo'), value: iaVal, hasArrows: true },
-            { label: T('lblAmmoFreq'), value: ammoFVal, hasArrows: true },
-        ];
+        drawSettingsOptions(options, 78, true);
 
-        drawSettingsOptions(options, 78);
+        // Show game mode description
+        const gmDesc = settings.lang === 0 ? GAME_MODE_OPTIONS[settings.gameMode].desc : GAME_MODE_OPTIONS[settings.gameMode].descDE;
+        drawPixelText(gmDesc, canvas.width / 2, 470, 9, '#888');
 
         const blink = Math.floor(Date.now() / 500) % 2;
-        drawPixelText(T('arrowChange'), canvas.width / 2, 490, 9, blink ? '#aaa' : '#666');
-        drawPixelText(T('pressH'), canvas.width / 2, 506, 9, '#4ecdc4');
+        drawPixelText(T('arrowChange'), canvas.width / 2, 486, 9, blink ? '#aaa' : '#666');
+        drawPixelText(T('pressH'), canvas.width / 2, 500, 9, '#4ecdc4');
     }
 
     // How to Play overlay
@@ -2670,12 +3494,25 @@ function drawSettingsScreen() {
 }
 
 // Helper to draw a list of setting options with cursor highlight
-function drawSettingsOptions(options, startY) {
-    const spacing = options.length > 9 ? 40 : (options.length > 7 ? 44 : (options.length > 5 ? 48 : 52));
-    const boxH = options.length > 9 ? 30 : (options.length > 7 ? 34 : (options.length > 5 ? 36 : 40));
-    for (let i = 0; i < options.length; i++) {
-        const y = startY + i * spacing;
-        const selected = settingsCursor === i;
+function drawSettingsOptions(options, startY, useScroll) {
+    const spacing = 48;
+    const boxH = 36;
+    const maxVisible = Math.floor((460 - startY) / spacing);
+
+    // Determine visible range
+    let scrollOff = 0;
+    let visStart = 0;
+    let visEnd = options.length;
+    if (useScroll && options.length > maxVisible) {
+        scrollOff = settingsScroll;
+        visStart = scrollOff;
+        visEnd = Math.min(options.length, scrollOff + maxVisible);
+    }
+
+    for (let vi = visStart; vi < visEnd; vi++) {
+        const drawIdx = vi - visStart;
+        const y = startY + drawIdx * spacing;
+        const selected = settingsCursor === vi;
         const boxColor = selected ? '#ffdd00' : '#555';
 
         // Box
@@ -2688,17 +3525,32 @@ function drawSettingsOptions(options, startY) {
         ctx.fillRect(648, y, 2, boxH);
 
         // Label + value on same line
-        drawPixelText(options[i].label, 240, y + boxH / 2 + 4, 11, selected ? '#ffdd00' : '#888');
+        drawPixelText(options[vi].label, 240, y + boxH / 2 + 4, 11, selected ? '#ffdd00' : '#888');
 
         const midY = y + boxH / 2 + 4;
-        if (selected && options[i].hasArrows) {
+        if (selected && options[vi].hasArrows) {
             const arrowBlink = Math.floor(Date.now() / 300) % 2;
             drawPixelText('<', 370, midY, 14, arrowBlink ? '#ffdd00' : '#aa8800');
             drawPixelText('>', 540, midY, 14, arrowBlink ? '#ffdd00' : '#aa8800');
         }
-        const isControls = options[i].label === 'CONTROLS';
+        const isControls = options[vi].label === 'CONTROLS';
         const valColor = (isControls && selected) ? '#4ecdc4' : (selected ? '#ffffff' : '#aaa');
-        drawPixelText(options[i].value, 455, midY, 12, valColor);
+        drawPixelText(options[vi].value, 455, midY, 12, valColor);
+    }
+
+    // Scroll indicators
+    if (useScroll && options.length > maxVisible) {
+        const arrowPulse = Math.sin(Date.now() / 300) * 0.3 + 0.7;
+        if (scrollOff > 0) {
+            ctx.globalAlpha = arrowPulse;
+            drawPixelText('\u25B2', canvas.width / 2, startY - 8, 10, '#ffdd00');
+            ctx.globalAlpha = 1;
+        }
+        if (visEnd < options.length) {
+            ctx.globalAlpha = arrowPulse;
+            drawPixelText('\u25BC', canvas.width / 2, startY + maxVisible * spacing + 4, 10, '#ffdd00');
+            ctx.globalAlpha = 1;
+        }
     }
 }
 
@@ -2975,8 +3827,10 @@ function drawGameOverScreen() {
     }
 
     // --- Stats Panel ---
+    const gm = settings.gameMode;
+    const extraRows = (gm === 3) ? 3 : (gm === 2) ? 2 : 0;
     const panelY = 155;
-    const panelH = 200;
+    const panelH = 200 + extraRows * 24;
     ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
     ctx.fillRect(60, panelY, 680, panelH);
     ctx.fillStyle = '#444';
@@ -2999,14 +3853,42 @@ function drawGameOverScreen() {
     ctx.fillStyle = player2.color;
     ctx.fillText(player2.name, col2X, panelY + 50);
 
-    // Stats rows
-    const statLabels = [T('shotsFired'), T('hits'), T('accuracy'), T('damageDone'), T('puCollected')];
+    // Stats rows - dynamic based on game mode
     const s1 = stats.p1;
     const s2 = stats.p2;
     const acc1 = s1.shotsFired > 0 ? Math.round((s1.hits / s1.shotsFired) * 100) : 0;
     const acc2 = s2.shotsFired > 0 ? Math.round((s2.hits / s2.shotsFired) * 100) : 0;
+
+    // Base stats (all modes)
+    const statLabels = [T('shotsFired'), T('hits'), T('accuracy'), T('damageDone'), T('puCollected')];
     const statVals1 = [s1.shotsFired, s1.hits, acc1 + '%', s1.damageDone, s1.powerupsCollected];
     const statVals2 = [s2.shotsFired, s2.hits, acc2 + '%', s2.damageDone, s2.powerupsCollected];
+
+    // Tag mode: add tagger stats + deaths
+    if (settings.gameMode === 3) {
+        statLabels.push(T('deaths'));
+        statVals1.push(s1.deaths);
+        statVals2.push(s2.deaths);
+        const p1Secs = Math.floor(tagState.p1Time / 1000);
+        const p2Secs = Math.floor(tagState.p2Time / 1000);
+        const p1WasTagger = tagState.tagger === player1;
+        statLabels.push(T('timeAsTagger'));
+        statVals1.push(p1Secs + 's');
+        statVals2.push(p2Secs + 's');
+        statLabels.push(T('lastTagger'));
+        statVals1.push(p1WasTagger ? T('yes') : T('no'));
+        statVals2.push(p1WasTagger ? T('no') : T('yes'));
+    }
+
+    // KOTH mode: add hill stats + deaths
+    if (settings.gameMode === 2) {
+        statLabels.push(T('deaths'));
+        statVals1.push(s1.deaths);
+        statVals2.push(s2.deaths);
+        statLabels.push(T('hillScore'));
+        statVals1.push(Math.floor(kothState.p1Score) + '/' + kothState.scoreToWin);
+        statVals2.push(Math.floor(kothState.p2Score) + '/' + kothState.scoreToWin);
+    }
 
     ctx.font = '11px monospace';
     for (let i = 0; i < statLabels.length; i++) {
@@ -3018,13 +3900,25 @@ function drawGameOverScreen() {
         ctx.fillText('' + statVals1[i], col1X, rowY);
         ctx.fillText('' + statVals2[i], col2X, rowY);
 
-        const v1 = parseFloat(statVals1[i]);
-        const v2 = parseFloat(statVals2[i]);
-        if (!isNaN(v1) && !isNaN(v2) && v1 !== v2) {
-            const betterX = v1 > v2 ? col1X : col2X;
-            const betterColor = v1 > v2 ? player1.color : player2.color;
-            ctx.fillStyle = betterColor;
-            ctx.fillText(v1 > v2 ? '' + statVals1[i] : '' + statVals2[i], betterX, rowY);
+        // "Last Tagger": highlight the "No" player in their color
+        if (statLabels[i] === T('lastTagger')) {
+            const noIsP1 = statVals1[i] === T('no');
+            const highlightX = noIsP1 ? col1X : col2X;
+            const highlightColor = noIsP1 ? player1.color : player2.color;
+            ctx.fillStyle = highlightColor;
+            ctx.fillText(noIsP1 ? '' + statVals1[i] : '' + statVals2[i], highlightX, rowY);
+        } else {
+            const v1 = parseFloat(statVals1[i]);
+            const v2 = parseFloat(statVals2[i]);
+            if (!isNaN(v1) && !isNaN(v2) && v1 !== v2) {
+                // For "Time as Tagger": lower is better
+                const lowerIsBetter = statLabels[i] === T('timeAsTagger') || statLabels[i] === T('deaths');
+                const p1Better = lowerIsBetter ? v1 < v2 : v1 > v2;
+                const betterX = p1Better ? col1X : col2X;
+                const betterColor = p1Better ? player1.color : player2.color;
+                ctx.fillStyle = betterColor;
+                ctx.fillText(p1Better ? '' + statVals1[i] : '' + statVals2[i], betterX, rowY);
+            }
         }
     }
 
@@ -3055,9 +3949,41 @@ function resetGame() {
     loser = null;
     deathTimer = 0;
     stats = {
-        p1: { shotsFired: 0, hits: 0, damageDone: 0, powerupsCollected: 0 },
-        p2: { shotsFired: 0, hits: 0, damageDone: 0, powerupsCollected: 0 },
+        p1: { shotsFired: 0, hits: 0, damageDone: 0, powerupsCollected: 0, deaths: 0 },
+        p2: { shotsFired: 0, hits: 0, damageDone: 0, powerupsCollected: 0, deaths: 0 },
     };
+
+    // One Shot mode: set HP to 1
+    if (settings.gameMode === 1) {
+        player1.hp = 1;
+        player2.hp = 1;
+    }
+
+    // King of the Hill mode: init KOTH state
+    if (settings.gameMode === 2) {
+        const hillPlat = platforms.find(p => p.isHill);
+        kothState = {
+            p1Score: 0,
+            p2Score: 0,
+            scoreToWin: 30,
+            hillZone: hillPlat ? { x: hillPlat.x, y: hillPlat.y - 50, w: hillPlat.w, h: 50 } : null,
+            currentHolder: null,
+            holdStart: Date.now(),
+        };
+    }
+
+    // Tag mode: init tag state
+    if (settings.gameMode === 3) {
+        const duration = TAG_DURATION_OPTIONS[settings.tagDuration].time;
+        tagState = {
+            tagger: player1,  // Player 1 starts as "it"
+            p1Time: 0,
+            p2Time: 0,
+            lastTagSwitch: Date.now(),
+            lastSwitch: 0,    // debounce timestamp for tag switching
+            roundEndTime: Date.now() + duration * 1000,
+        };
+    }
 }
 
 function updateSuddenDeath() {
@@ -3116,7 +4042,8 @@ function gameLoop() {
         player2.update();
         updatePowerups();
         updateAmmoPickups();
-        updateSuddenDeath();
+        if (settings.gameMode === 0 || settings.gameMode === 1) updateSuddenDeath();
+        if (settings.gameMode === 2) updateKOTH();
         checkBulletHits();
         checkWin();
         updateParticles();
@@ -3124,13 +4051,15 @@ function gameLoop() {
 
         drawBg();
         drawPlatforms();
+        if (settings.gameMode === 2) drawKOTHHud(); // draw hill zone before players
         drawPowerups();
         drawAmmoPickups();
         player1.draw();
         player2.draw();
         drawParticles();
         drawDamageNumbers();
-        drawRoundTimer();
+        if (settings.gameMode === 0 || settings.gameMode === 1) drawRoundTimer();
+        if (settings.gameMode === 3) drawTagHud();
     } else if (gameState === 'dying') {
         updateDeathAnimation();
         updateParticles();
@@ -3147,8 +4076,15 @@ function gameLoop() {
     } else if (gameState === 'gameover') {
         drawBg();
         drawPlatforms();
-        // Only draw the winner (loser has exploded)
-        if (winner === player1) { player1.draw(); } else { player2.draw(); }
+        if (settings.gameMode === 2 || settings.gameMode === 3) {
+            // KOTH and Tag: both players alive, draw both
+            player1.draw();
+            player2.draw();
+            if (settings.gameMode === 2) drawKOTHHud();
+        } else {
+            // Classic/One Shot: only draw the winner (loser has exploded)
+            if (winner === player1) { player1.draw(); } else { player2.draw(); }
+        }
         updateParticles();
         updateDamageNumbers();
         drawParticles();
