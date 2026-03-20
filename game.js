@@ -3134,11 +3134,6 @@ function spawnPowerup() {
     // Extra life only in Lava Rise mode
     if (settings.gameMode !== 4) types = types.filter(t => !POWERUP_TYPES[t].lavaOnly);
     if (types.length === 0) return;
-    // === TEST: only spawn new powerups ===
-    const testOnly = ['swap', 'lavafreeze', 'platspawn', 'invert'];
-    const testTypes = types.filter(t => testOnly.includes(t));
-    if (testTypes.length > 0) types = testTypes;
-    // === END TEST ===
     // Weighted selection based on each powerup's weight
     let totalWeight = 0;
     for (const t of types) totalWeight += (POWERUP_TYPES[t].weight || 1);
