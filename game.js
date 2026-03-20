@@ -220,6 +220,7 @@ let lavaState = {
     p2Lives: 3,
     framesSinceStart: 0,
     useStructures: false,  // switch to pre-built structures after ~30s
+    windZones: [],         // array of { x, y, w, h, strength, particles[] }
 };
 
 // --- Translations ---
@@ -1255,6 +1256,8 @@ class Player {
 
     update() {
         const wasMoving = this.vx !== 0;
+        const prevVx = this.vx; // save for ice sliding
+        const onIce = this.standingOn && this.standingOn.ice;
         this.vx = 0;
 
         // AI in Lava Rise gets a small speed boost
@@ -1268,6 +1271,21 @@ class Player {
         if (keys[this.controls.right]) {
             this.vx = speed;
             this.facing = 1;
+        }
+
+        // Ice platform sliding: very slippery! Accelerate while moving, slide when stopping
+        if (onIce) {
+            const inputVx = this.vx;
+            if (inputVx !== 0) {
+                // Moving on ice: slowly accelerate, keep most momentum
+                this.vx = inputVx * 0.15 + prevVx * 0.93;
+            } else {
+                // Not pressing anything: coast with very high momentum
+                this.vx = prevVx * 0.985;
+                if (Math.abs(this.vx) < 0.2) this.vx = 0;
+            }
+            const maxIce = speed * 1.6;
+            this.vx = Math.max(-maxIce, Math.min(maxIce, this.vx));
         }
 
         // Apply knockback (decays with friction)
@@ -1330,6 +1348,20 @@ class Player {
         if (this.hitFlash > 0) this.hitFlash--;
         if (this.muzzleFlash > 0) this.muzzleFlash--;
 
+        // Apply wind zone force (Lava Rise mode)
+        if (settings.gameMode === 4 && lavaState.windZones) {
+            const cx = this.x + this.w / 2;
+            const cy = this.y + this.h / 2;
+            for (const wz of lavaState.windZones) {
+                if (cx > wz.x && cx < wz.x + wz.w && cy > wz.y && cy < wz.y + wz.h) {
+                    // Stronger wind on normal ground (no ice sliding to counteract)
+                    const onNormalGround = this.onGround && this.standingOn && !this.standingOn.ice;
+                    const windMult = onNormalGround ? 2.0 : 1.0;
+                    this.vx += wz.strength * windMult;
+                }
+            }
+        }
+
         this.vy += GRAVITY_OPTIONS[settings.gravity].value;
         this.x += this.vx;
 
@@ -1352,9 +1384,17 @@ class Player {
                 this.vy >= 0
             ) {
                 this.y = p.y - this.h;
-                this.vy = 0;
-                this.onGround = true;
-                this.standingOn = p;
+                if (p.bounce) {
+                    // Bounce platform: launch upward!
+                    const gravScale = GRAVITY_OPTIONS[settings.gravity].value / 0.6;
+                    this.vy = JUMP_FORCE * Math.sqrt(gravScale) * 1.6;
+                    this.onGround = false;
+                    p.bounceAnim = 8; // visual feedback
+                } else {
+                    this.vy = 0;
+                    this.onGround = true;
+                    this.standingOn = p;
+                }
             }
         }
 
@@ -2534,6 +2574,8 @@ const AI = {
             if (vertDist < 30) score -= 100; // too close below, not worth it
             if (p.breakable) score -= 80;    // avoid breakable platforms
             if (p.breakable && p.breakTimer > 0) score -= 500; // actively breaking = never
+            if (p.bounce) score += 60;       // bounce pads are great shortcuts
+            if (p.ice) score -= 30;          // ice is risky, slight penalty
 
             if (score > bestScore) {
                 bestScore = score;
@@ -3480,6 +3522,42 @@ function drawPlatforms() {
                 ctx.fillRect(midX - 1, p.y + 4, 2, 6);
                 ctx.fillRect(midX - 1, p.y + p.h - 10, 2, 6);
             }
+        } else if (p.bounce) {
+            // Bounce/trampoline platform: bright green with spring coils
+            const squish = p.bounceAnim ? Math.max(0, p.bounceAnim) : 0;
+            const sy = p.y + squish; // squishes down on bounce
+            const sh = p.h - squish;
+            ctx.fillStyle = '#2a9a2a';
+            ctx.fillRect(p.x, sy, p.w, sh);
+            // Spring coil marks
+            ctx.fillStyle = '#5aff5a';
+            ctx.fillRect(p.x, sy, p.w, 2);
+            for (let sx = p.x + 8; sx < p.x + p.w - 8; sx += 14) {
+                ctx.fillStyle = '#1a6a1a';
+                ctx.fillRect(sx, sy + 4, 3, sh - 6);
+                ctx.fillRect(sx + 5, sy + 2, 3, sh - 4);
+            }
+            // Bright top edge
+            ctx.fillStyle = '#7fff7f';
+            ctx.fillRect(p.x, sy, p.w, 1);
+            ctx.fillStyle = '#1a5a1a';
+            ctx.fillRect(p.x, sy + sh - 2, p.w, 2);
+        } else if (p.ice) {
+            // Ice platform: light blue / white with shine
+            ctx.fillStyle = '#a8d8ea';
+            ctx.fillRect(p.x, p.y, p.w, p.h);
+            // Shiny highlight
+            ctx.fillStyle = '#d4f0ff';
+            ctx.fillRect(p.x, p.y, p.w, 3);
+            // Sparkle marks
+            ctx.fillStyle = '#ffffff';
+            for (let ix = p.x + 6; ix < p.x + p.w - 6; ix += 20 + Math.sin(ix * 0.3) * 5) {
+                ctx.fillRect(ix, p.y + 1, 4, 1);
+                ctx.fillRect(ix + 2, p.y + 4, 2, 1);
+            }
+            // Bottom edge
+            ctx.fillStyle = '#6aafc8';
+            ctx.fillRect(p.x, p.y + p.h - 2, p.w, 2);
         } else {
             drawTiledRect(platTileCanvas, p.x, p.y, p.w, p.h);
             // Edge highlights
@@ -4386,6 +4464,16 @@ const LAVA_STRUCTURES = {
                 { x: 300, y: -280, w: 200 },
             ],
         },
+        { // Trampoline launch - bounce pad sends you high
+            height: 350,
+            platforms: [
+                { x: 150, y: 0, w: 500 },              // wide start
+                { x: 320, y: -30, w: 120, bounce: true }, // bounce pad center
+                { x: 100, y: -250, w: 200 },            // left landing high up
+                { x: 500, y: -250, w: 200 },            // right landing high up
+                { x: 250, y: -350, w: 300 },            // exit
+            ],
+        },
     ],
     // --- MEDIUM structures (1-2 paths, tighter jumps, max ~130px edge gap) ---
     medium: [
@@ -4455,6 +4543,27 @@ const LAVA_STRUCTURES = {
                 { x: 200, y: -160, w: 140 },
                 { x: 450, y: -240, w: 120, moving: { axis: 'h', speed: 0.025, range: -70 } },
                 { x: 250, y: -320, w: 300 },
+            ],
+        },
+        { // Bounce zigzag - alternating bounce pads
+            height: 400,
+            platforms: [
+                { x: 200, y: 0, w: 400 },                   // wide start
+                { x: 150, y: -30, w: 100, bounce: true },    // bounce left
+                { x: 450, y: -200, w: 180 },                 // landing right
+                { x: 550, y: -230, w: 100, bounce: true },   // bounce right
+                { x: 150, y: -400, w: 200 },                 // landing left
+                { x: 450, y: -400, w: 200 },                 // landing right
+            ],
+        },
+        { // Ice bridge - slippery crossing
+            height: 300,
+            platforms: [
+                { x: 150, y: 0, w: 200 },                   // safe start
+                { x: 400, y: -70, w: 300, ice: true },       // long ice bridge
+                { x: 100, y: -150, w: 300, ice: true },      // ice bridge back
+                { x: 450, y: -230, w: 200 },                 // safe landing
+                { x: 250, y: -300, w: 300 },                 // exit
             ],
         },
     ],
@@ -4601,6 +4710,79 @@ const LAVA_STRUCTURES = {
                 { x: 220, y: -560, w: 360 },
             ],
         },
+        { // Trampoline Tower: massive climb through bounce pads only
+            height: 1500,
+            platforms: [
+                // Base
+                { x: 200, y: 0, w: 400 },                      // wide start
+                // Bounce 1: center
+                { x: 300, y: -30, w: 130, bounce: true },
+                // Bounce 2: slightly right
+                { x: 420, y: -280, w: 120, bounce: true },
+                // Bounce 3: slightly left
+                { x: 250, y: -530, w: 120, bounce: true },
+                // Bounce 4: center-right
+                { x: 400, y: -780, w: 120, bounce: true },
+                // Bounce 5: center-left
+                { x: 270, y: -1030, w: 120, bounce: true },
+                // Bounce 6: center
+                { x: 350, y: -1280, w: 120, bounce: true },
+                // Exit
+                { x: 200, y: -1500, w: 400 },                   // wide exit
+            ],
+        },
+        { // Twin Towers (U-shape): two separate towers, one ends early, other continues to exit
+            height: 1100,
+            platforms: [
+                // Base: wide U-bottom connecting both sides
+                { x: 30, y: 0, w: 740 },
+
+                // === LEFT TOWER (x: 30-220) ===
+                { x: 50, y: -75, w: 170 },
+                { x: 30, y: -150, w: 160 },
+                { x: 60, y: -225, w: 170 },
+                { x: 30, y: -300, w: 160 },
+                { x: 50, y: -375, w: 170 },
+                { x: 30, y: -450, w: 160 },
+                { x: 60, y: -525, w: 170 },
+                { x: 30, y: -600, w: 160 },
+                { x: 50, y: -675, w: 170 },
+                { x: 30, y: -750, w: 160 },
+                { x: 50, y: -825, w: 180 },          // LEFT TOWER ENDS (~100m)
+
+                // === RIGHT TOWER (x: 570-770) ===
+                { x: 580, y: -75, w: 170 },
+                { x: 610, y: -150, w: 160 },
+                { x: 580, y: -225, w: 170 },
+                { x: 610, y: -300, w: 160 },
+                { x: 580, y: -375, w: 170 },
+                { x: 610, y: -450, w: 160 },
+                { x: 580, y: -525, w: 170 },
+                { x: 610, y: -600, w: 160 },
+                { x: 580, y: -675, w: 170 },
+                { x: 610, y: -750, w: 160 },
+                { x: 580, y: -825, w: 170 },
+                // Right tower continues alone
+                { x: 600, y: -900, w: 160 },
+                { x: 570, y: -975, w: 180 },
+                // Bridge to exit
+                { x: 350, y: -1040, w: 220 },
+                // Exit
+                { x: 200, y: -1100, w: 400 },
+            ],
+        },
+        { // Ice gauntlet: slippery bridges with gaps
+            height: 350,
+            platforms: [
+                { x: 30, y: 0, w: 250 },                     // safe start
+                { x: 350, y: 0, w: 250, ice: true },          // ice section
+                { x: 650, y: -70, w: 120 },                   // step up right
+                { x: 250, y: -70, w: 350, ice: true },        // long ice bridge back
+                { x: 30, y: -150, w: 160 },                   // safe left
+                { x: 300, y: -230, w: 350, ice: true },       // ice bridge
+                { x: 250, y: -350, w: 300 },                  // exit
+            ],
+        },
     ],
 };
 
@@ -4618,11 +4800,18 @@ function generateLavaPlatformRow(y) {
         const plat = {
             x, y, w, h: 16,
         };
-        // Breakable chance increases over time: 35% after 10s, 50% after 60s
-        const breakChance = time > 10 ? Math.min(0.5, 0.35 + (time - 10) * 0.003) : 0;
+        // Breakable chance increases over time: 20% after 10s, max 30%
+        const breakChance = time > 10 ? Math.min(0.3, 0.2 + (time - 10) * 0.002) : 0;
         if (Math.random() < breakChance) {
             plat.breakable = true;
             plat.breakTimer = 0;
+        }
+        // Ice chance: 15% after 20s, up to 25%
+        if (!plat.breakable) {
+            const iceChance = time > 20 ? Math.min(0.25, 0.15 + (time - 20) * 0.001) : 0;
+            if (Math.random() < iceChance) {
+                plat.ice = true;
+            }
         }
         platforms.push(plat);
     }
@@ -4634,12 +4823,26 @@ function placeStructure(structure, baseY) {
     for (const p of structure.platforms) {
         const x = mirror ? (800 - p.x - p.w) : p.x;
         const plat = { x, y: baseY + p.y, w: p.w, h: 16 };
+        // Bounce platforms from structure definition
+        if (p.bounce) {
+            plat.bounce = true;
+        }
+        // Ice platforms from structure definition or random chance
+        if (p.ice) {
+            plat.ice = true;
+        } else if (!p.bounce && !p.moving && !p.breakable) {
+            const time = lavaState.framesSinceStart / 60;
+            const iceChance = time > 20 ? Math.min(0.2, 0.12 + (time - 20) * 0.001) : 0;
+            if (Math.random() < iceChance) plat.ice = true;
+        }
         // Breakable: defined in structure or random chance (less in endgame)
-        const time = lavaState.framesSinceStart / 60;
-        const breakChance = time > 150 ? 0.18 : 0.3;
-        if (p.breakable || (!p.moving && Math.random() < breakChance)) {
-            plat.breakable = true;
-            plat.breakTimer = 0;
+        if (!p.bounce && !plat.ice) {
+            const time = lavaState.framesSinceStart / 60;
+            const breakChance = time > 150 ? 0.12 : 0.2;
+            if (p.breakable || (!p.moving && Math.random() < breakChance)) {
+                plat.breakable = true;
+                plat.breakTimer = 0;
+            }
         }
         if (p.moving) {
             const axis = p.moving.axis;
@@ -4679,9 +4882,13 @@ function pickStructure() {
     } else {
         pool = LAVA_STRUCTURES.hard;
     }
-    // 30% boosted chance for "Two paths: zigzag vs elevator" (index 5)
-    if (pool === LAVA_STRUCTURES.hard && Math.random() < 0.3) {
+    // 25% boosted chance for "Two paths: zigzag vs elevator" (index 5)
+    if (pool === LAVA_STRUCTURES.hard && Math.random() < 0.25) {
         return pool[5];
+    }
+    // 20% boosted chance for "Trampoline Tower" (index 10)
+    if (pool === LAVA_STRUCTURES.hard && Math.random() < 0.2) {
+        return pool[10];
     }
     return pool[Math.floor(Math.random() * pool.length)];
 }
@@ -4737,6 +4944,53 @@ function updateLavaMode() {
             lavaState.nextPlatformY -= gap;
             generateLavaPlatformRow(lavaState.nextPlatformY);
         }
+    }
+
+    // Generate wind zones (mid-endgame: after 60 seconds)
+    const timeS = lavaState.framesSinceStart / 60;
+    if (timeS > 60) {
+        // Spawn new wind zone every ~8 seconds, keep max 4 active
+        const windInterval = 480; // frames
+        if (lavaState.framesSinceStart % windInterval === 0 && lavaState.windZones.length < 4) {
+            const wzW = 150 + Math.random() * 200; // 150-350px wide
+            const wzH = 200 + Math.random() * 200; // 200-400px tall
+            const wzX = Math.random() * (800 - wzW);
+            const wzY = worldTopY - 100 - Math.random() * 300; // above visible area
+            // Strength increases over time: 0.4-1.2 px/frame
+            const maxStr = Math.min(1.2, 0.4 + (timeS - 60) * 0.005);
+            const str = (0.4 + Math.random() * (maxStr - 0.4)) * (Math.random() < 0.5 ? 1 : -1);
+            // Create particles for visual effect
+            const particles = [];
+            for (let i = 0; i < 12; i++) {
+                particles.push({
+                    x: Math.random() * wzW,
+                    y: Math.random() * wzH,
+                    speed: 0.5 + Math.random() * 1.5,
+                });
+            }
+            lavaState.windZones.push({ x: wzX, y: wzY, w: wzW, h: wzH, strength: str, particles });
+        }
+    }
+    // Remove wind zones that are below lava
+    for (let i = lavaState.windZones.length - 1; i >= 0; i--) {
+        if (lavaState.windZones[i].y > lavaState.lavaY + 50) {
+            lavaState.windZones.splice(i, 1);
+        }
+    }
+    // Animate wind particles
+    for (const wz of lavaState.windZones) {
+        for (const pt of wz.particles) {
+            pt.x += wz.strength * pt.speed;
+            if (wz.strength > 0 && pt.x > wz.w) pt.x = 0;
+            if (wz.strength < 0 && pt.x < 0) pt.x = wz.w;
+            pt.y += 0.3 + Math.random() * 0.2;
+            if (pt.y > wz.h) pt.y = 0;
+        }
+    }
+
+    // Update bounce platform animations
+    for (const p of platforms) {
+        if (p.bounceAnim && p.bounceAnim > 0) p.bounceAnim--;
     }
 
     // Update moving platforms
@@ -4869,6 +5123,53 @@ function checkLavaDeath(player, pKey) {
     }
 }
 
+function drawWindZones() {
+    if (!lavaState.windZones) return;
+    for (const wz of lavaState.windZones) {
+        // Semi-transparent background tint
+        const dir = wz.strength > 0 ? 1 : -1;
+        const alpha = Math.min(0.12, Math.abs(wz.strength) * 0.1);
+        ctx.fillStyle = `rgba(180, 220, 255, ${alpha})`;
+        ctx.fillRect(wz.x, wz.y, wz.w, wz.h);
+
+        // Border lines (dashed look)
+        ctx.fillStyle = 'rgba(150, 200, 255, 0.25)';
+        ctx.fillRect(wz.x, wz.y, wz.w, 2);
+        ctx.fillRect(wz.x, wz.y + wz.h - 2, wz.w, 2);
+        ctx.fillRect(wz.x, wz.y, 2, wz.h);
+        ctx.fillRect(wz.x + wz.w - 2, wz.y, 2, wz.h);
+
+        // Wind streak particles
+        ctx.fillStyle = 'rgba(200, 230, 255, 0.5)';
+        for (const pt of wz.particles) {
+            const px = wz.x + pt.x;
+            const py = wz.y + pt.y;
+            // Draw a small streak in wind direction
+            const len = 8 + Math.abs(wz.strength) * 6;
+            ctx.fillRect(px, py, len * dir, 2);
+        }
+
+        // Direction arrow indicators (at edges)
+        ctx.fillStyle = 'rgba(180, 220, 255, 0.4)';
+        const arrowY = wz.y + wz.h / 2;
+        if (dir > 0) {
+            // Right arrows
+            for (let ay = wz.y + 30; ay < wz.y + wz.h - 30; ay += 60) {
+                ctx.fillRect(wz.x + wz.w - 20, ay - 3, 12, 2);
+                ctx.fillRect(wz.x + wz.w - 20, ay + 1, 12, 2);
+                ctx.fillRect(wz.x + wz.w - 10, ay - 1, 4, 2);
+            }
+        } else {
+            // Left arrows
+            for (let ay = wz.y + 30; ay < wz.y + wz.h - 30; ay += 60) {
+                ctx.fillRect(wz.x + 8, ay - 3, 12, 2);
+                ctx.fillRect(wz.x + 8, ay + 1, 12, 2);
+                ctx.fillRect(wz.x + 6, ay - 1, 4, 2);
+            }
+        }
+    }
+}
+
 function drawLava() {
     const lY = lavaState.lavaY;
     // Lava glow above surface
@@ -4942,14 +5243,13 @@ function drawLavaHud() {
         ctx.fillRect(hx + 3, hy + 8, 3, 1);
     }
 
-    // Lava speed / height indicator
-    const elapsed = Math.floor(lavaState.framesSinceStart / 60);
-    const mins = Math.floor(elapsed / 60);
-    const secs = elapsed % 60;
+    // Height meter: show how far above starting point (in meters)
+    const heightPixels = Math.max(0, 500 - lavaState.lavaY);
+    const heightMeters = Math.floor(heightPixels / 8); // ~8 pixels per meter
     ctx.fillStyle = '#ff8800';
-    ctx.font = 'bold 12px monospace';
+    ctx.font = 'bold 14px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(mins + ':' + (secs < 10 ? '0' : '') + secs, 400, 16);
+    ctx.fillText('▲ ' + heightMeters + 'm', 400, 16);
 }
 
 // ============================================
@@ -5019,6 +5319,7 @@ function resetGame() {
             p2Lives: lives,
             framesSinceStart: 0,
             useStructures: false,
+            windZones: [],
         };
         initLavaPlatforms();
         // Position players on the wide starting platform
@@ -5107,6 +5408,7 @@ function gameLoop() {
         drawParticles();
         drawDamageNumbers();
         if (settings.gameMode === 4) {
+            drawWindZones();
             drawLava();
             ctx.restore();
             drawLavaHud();
@@ -5131,6 +5433,7 @@ function gameLoop() {
         drawParticles();
         drawDamageNumbers();
         if (settings.gameMode === 4) {
+            drawWindZones();
             drawLava();
             ctx.restore();
             drawLavaHud();
@@ -5159,6 +5462,7 @@ function gameLoop() {
         drawParticles();
         drawDamageNumbers();
         if (settings.gameMode === 4) {
+            drawWindZones();
             drawLava();
             ctx.restore();
         }
