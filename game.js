@@ -23,8 +23,9 @@ const POWERUP_TYPES = {
         color: '#44dd44',
         colorDark: '#228822',
         symbol: '+',
-        duration: 0, // instant
+        duration: 0,
         description: '+40 HP',
+        weight: 2,
     },
     invincible: {
         name: 'Shield',
@@ -33,14 +34,16 @@ const POWERUP_TYPES = {
         symbol: 'S',
         duration: 5000,
         description: '5s invincible',
+        weight: 1,
     },
     rapidfire: {
-        name: 'Rapid Fire',
+        name: 'Rapid Bullets',
         color: '#ff8800',
         colorDark: '#aa5500',
         symbol: 'F',
         duration: 6000,
-        description: '6s faster bullets',
+        description: '6s rapid fire',
+        weight: 1.5,
     },
     nocooldown: {
         name: 'No Cooldown',
@@ -48,7 +51,8 @@ const POWERUP_TYPES = {
         colorDark: '#7722aa',
         symbol: '!',
         duration: 4000,
-        description: '4s half cooldown',
+        description: '4s no cooldown',
+        weight: 1.5,
     },
     damage: {
         name: 'More Damage',
@@ -57,6 +61,91 @@ const POWERUP_TYPES = {
         symbol: 'D',
         duration: 6000,
         description: '6s 3x damage',
+        weight: 1,
+    },
+    extralife: {
+        name: 'Extra Life',
+        color: '#ff66aa',
+        colorDark: '#aa3366',
+        symbol: '\u2665',
+        duration: 0,
+        description: '+1 Life',
+        weight: 1.5,
+        lavaOnly: true,
+    },
+    doublejump: {
+        name: 'Double Jump',
+        color: '#66ddff',
+        colorDark: '#3388aa',
+        symbol: '\u2191',
+        duration: 0,
+        description: '+1 Double Jump',
+        weight: 2,
+    },
+    noknockback: {
+        name: 'No Knockback',
+        color: '#aaaaaa',
+        colorDark: '#666666',
+        symbol: 'K',
+        duration: 5000,
+        description: '5s no knockback',
+        weight: 1.5,
+    },
+    speedboost: {
+        name: 'Speed Boost',
+        color: '#44ffaa',
+        colorDark: '#22aa66',
+        symbol: '>',
+        duration: 10000,
+        description: '10s +50% speed',
+        weight: 1.5,
+    },
+    superjump: {
+        name: 'Super Jump',
+        color: '#ffff44',
+        colorDark: '#aaaa22',
+        symbol: '^',
+        duration: 8000,
+        description: '8s +35% jump',
+        weight: 1.5,
+    },
+    swap: {
+        name: 'Swap',
+        color: '#ff66ff',
+        colorDark: '#aa33aa',
+        symbol: '\u21C4',
+        duration: 0,
+        description: 'Swap positions [E]',
+        weight: 0.3,
+    },
+    lavafreeze: {
+        name: 'Lava Freeze',
+        color: '#88ddff',
+        colorDark: '#4488aa',
+        symbol: '*',
+        duration: 0,
+        description: '5s lava stop',
+        weight: 1.5,
+        lavaOnly: true,
+    },
+    platspawn: {
+        name: 'Platform',
+        color: '#bb88ff',
+        colorDark: '#7744aa',
+        symbol: '_',
+        duration: 0,
+        description: '+1 Platform [\u2193]',
+        weight: 1.5,
+        lavaOnly: true,
+    },
+    invert: {
+        name: 'Invert',
+        color: '#ff4488',
+        colorDark: '#aa2255',
+        symbol: '?',
+        duration: 15000,
+        description: '15s invert enemy',
+        weight: 0.8,
     },
 };
 const POWERUP_SPAWN_INTERVAL = 4000; // ms between spawns
@@ -97,7 +186,7 @@ const settings = {
     ammoFreq: 1,     // index into AMMO_FREQ_OPTIONS (default Normal)
     p1Skin: 0,       // index into SKIN_OPTIONS (default Cyan)
     p2Skin: 1,       // index into SKIN_OPTIONS (default Red)
-    gameMode: 0,     // index into GAME_MODE_OPTIONS (0=Classic, 1=One Shot, 2=King of the Hill, 3=Tag)
+    gameMode: 0,     // index into GAME_MODE_OPTIONS (0=Classic, 1=One Shot, 2=King of the Hill, 3=Tag, 4=Lava Rise)
     tagWinRule: 0,   // 0 = not "it" at end wins, 1 = shortest time as "it" wins
     tagDuration: 1,  // index into TAG_DURATION_OPTIONS (default 60s)
     knockback: 1,    // index into KNOCKBACK_OPTIONS (default Normal)
@@ -221,6 +310,7 @@ let lavaState = {
     framesSinceStart: 0,
     useStructures: false,  // switch to pre-built structures after ~30s
     windZones: [],         // array of { x, y, w, h, strength, particles[] }
+    freezeUntil: 0,        // timestamp when lava freeze ends
 };
 
 // --- Translations ---
@@ -1248,6 +1338,14 @@ class Player {
         this.muzzleFlash = 0;
         // Power-up state
         this.activePowerups = {}; // type -> expiry timestamp
+        this.doubleJumps = 0; // stackable double jump charges
+        this.jumpPressed = false; // for double jump edge detection
+        this.usedDoubleJump = false; // prevent double jump while holding from ground
+        this.platformCharges = 0; // stackable platform spawn charges
+        this.platSpawnPressed = false; // edge detection for platform spawn
+        this.swapCharges = 0; // stackable swap charges
+        this.swapPressed = false; // edge detection for swap activation
+        this.invertedUntil = 0; // timestamp when invert wears off
         this.dropThrough = false; // falling through platform
         this.dropPlatform = null; // which platform to ignore
         this.ammo = START_AMMO; // ammo count (only used when infiniteAmmo is Off)
@@ -1262,13 +1360,22 @@ class Player {
 
         // AI in Lava Rise gets a small speed boost
         const isLavaAI = settings.gameMode === 4 && gameMode === 'pve' && this === player2;
-        const speed = isLavaAI ? PLAYER_SPEED * 1.2 : PLAYER_SPEED;
+        let speed = isLavaAI ? PLAYER_SPEED * 1.2 : PLAYER_SPEED;
+        // Speed boost powerup: +50% movement speed
+        if (this.hasPowerup('speedboost')) speed *= 1.5;
 
-        if (keys[this.controls.left]) {
+        // Invert controls check
+        const inverted = this.invertedUntil && Date.now() < this.invertedUntil;
+        const leftKey = inverted ? this.controls.right : this.controls.left;
+        const rightKey = inverted ? this.controls.left : this.controls.right;
+        const jumpKey = inverted ? this.controls.down : this.controls.jump;
+        const downKey = inverted ? this.controls.jump : this.controls.down;
+
+        if (keys[leftKey]) {
             this.vx = -speed;
             this.facing = -1;
         }
-        if (keys[this.controls.right]) {
+        if (keys[rightKey]) {
             this.vx = speed;
             this.facing = 1;
         }
@@ -1293,17 +1400,37 @@ class Player {
         this.knockbackVx *= 0.85; // friction decay
         if (Math.abs(this.knockbackVx) < 0.2) this.knockbackVx = 0;
 
-        if (keys[this.controls.jump] && this.onGround) {
-            // Scale jump force with gravity so jump height stays proportional
-            const gravScale = GRAVITY_OPTIONS[settings.gravity].value / 0.6;
-            // AI in Lava Rise jumps slightly higher
-            const jumpMult = isLavaAI ? 1.12 : 1;
-            this.vy = JUMP_FORCE * Math.sqrt(gravScale) * jumpMult;
-            this.onGround = false;
+        if (keys[jumpKey]) {
+            if (this.onGround) {
+                // Normal ground jump (hold to auto-jump on landing)
+                const gravScale = GRAVITY_OPTIONS[settings.gravity].value / 0.6;
+                const jumpMult = isLavaAI ? 1.12 : 1;
+                const sjMult = this.hasPowerup('superjump') ? 1.35 : 1;
+                this.vy = JUMP_FORCE * Math.sqrt(gravScale) * jumpMult * sjMult;
+                this.onGround = false;
+                this.usedDoubleJump = true; // block double jump while holding from ground
+            } else if (!this.onGround && this.doubleJumps > 0 && !this.usedDoubleJump && !this.jumpPressed && !this._nearPlatformBelow()) {
+                // Double jump (mid-air, requires fresh key press, not near a platform)
+                const gravScale = GRAVITY_OPTIONS[settings.gravity].value / 0.6;
+                const jumpMult = isLavaAI ? 1.12 : 1;
+                const sjMult = this.hasPowerup('superjump') ? 1.35 : 1;
+                this.vy = JUMP_FORCE * Math.sqrt(gravScale) * jumpMult * 1.1 * sjMult;
+                this.doubleJumps--;
+                this.usedDoubleJump = true;
+                this.jumpPressed = true;
+                // Visual burst
+                spawnParticles(this.x + this.w / 2, this.y + this.h, '#66ddff', 6);
+            }
+        } else {
+            this.jumpPressed = false;
+            // Only allow double jump after releasing key mid-air
+            if (!this.onGround) this.usedDoubleJump = false;
         }
+        // Reset double jump lock on landing
+        if (this.onGround) this.usedDoubleJump = false;
 
         // Drop through platform (one-press trigger)
-        if (settings.dropThrough === 0 && keys[this.controls.down] && this.onGround && !this.dropPressed) {
+        if (settings.dropThrough === 0 && keys[downKey] && this.onGround && !this.dropPressed) {
             this.dropPressed = true;
             for (const p of platforms) {
                 if (p.isGround) continue;
@@ -1320,9 +1447,43 @@ class Player {
                 }
             }
         }
-        if (!keys[this.controls.down]) {
+        if (!keys[downKey]) {
             this.dropPressed = false;
+            this.platSpawnPressed = false;
         }
+
+        // Platform spawn: press down while in air (Lava Rise, with charges)
+        // Must be truly airborne (not dropping through a platform)
+        if (settings.gameMode === 4 && this.platformCharges > 0 && !this.onGround && !this.dropThrough && keys[downKey] && !this.platSpawnPressed) {
+            this.platSpawnPressed = true;
+            this.dropPressed = true; // prevent immediate drop-through on landing
+            this.platformCharges--;
+            // Spawn a temporary platform below the player's feet
+            const pw = 100;
+            const px = Math.max(0, Math.min(800 - pw, this.x + this.w / 2 - pw / 2));
+            const py = this.y + this.h + 20;
+            const newPlat = { x: px, y: py, w: pw, h: 16, temporary: true, spawnTime: Date.now() };
+            platforms.push(newPlat);
+            spawnParticles(px + pw / 2, py, '#bb88ff', 8);
+        }
+
+        // Swap activation: press dedicated swap key (P1: E, P2: RShift)
+        const swapKey = this === player1 ? 'KeyE' : 'ShiftRight';
+        if (this.swapCharges > 0 && keys[swapKey] && !this.swapPressed) {
+            this.swapPressed = true;
+            this.swapCharges--;
+            const other = this === player1 ? player2 : player1;
+            const tmpX = this.x, tmpY = this.y;
+            this.x = other.x; this.y = other.y;
+            other.x = tmpX; other.y = tmpY;
+            // Swap velocities too for fairness
+            const tmpVx = this.vx, tmpVy = this.vy;
+            this.vx = other.vx; this.vy = other.vy;
+            other.vx = tmpVx; other.vy = tmpVy;
+            spawnParticles(this.x + 16, this.y + 20, '#ff66ff', 12);
+            spawnParticles(other.x + 16, other.y + 20, '#ff66ff', 12);
+        }
+        if (!keys[swapKey]) this.swapPressed = false;
 
         if (keys[this.controls.shoot]) {
             this.shoot();
@@ -1456,6 +1617,20 @@ class Player {
         return this.activePowerups[type] && Date.now() < this.activePowerups[type];
     }
 
+    _nearPlatformBelow() {
+        // Check if player is falling and close above a platform (within 25px)
+        if (this.vy < 0) return false; // going up, not about to land
+        const feetY = this.y + this.h;
+        for (const p of platforms) {
+            if (p.bounce) continue; // bounce pads are fine
+            if (this.x + this.w > p.x && this.x < p.x + p.w &&
+                feetY <= p.y && feetY + 25 > p.y) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     applyPowerup(type) {
         const def = POWERUP_TYPES[type];
         const cx = this.x + this.w / 2;
@@ -1466,6 +1641,32 @@ class Player {
         if (type === 'heal') {
             this.hp = Math.min(HP_OPTIONS[settings.hp], this.hp + 40);
             spawnCollectBurst(cx, cy, '#44dd44');
+        } else if (type === 'extralife') {
+            // Add 1 life (Lava Rise only)
+            if (this === player1) lavaState.p1Lives++;
+            else if (this === player2) lavaState.p2Lives++;
+            spawnCollectBurst(cx, cy, def.color);
+        } else if (type === 'doublejump') {
+            // Stackable: add 1 double jump charge
+            this.doubleJumps++;
+            spawnCollectBurst(cx, cy, def.color);
+        } else if (type === 'swap') {
+            // Stackable: add 1 swap charge to inventory
+            this.swapCharges++;
+            spawnCollectBurst(cx, cy, def.color);
+        } else if (type === 'lavafreeze') {
+            // Freeze lava for 5 seconds
+            lavaState.freezeUntil = Date.now() + 5000;
+            spawnCollectBurst(cx, cy, def.color);
+        } else if (type === 'platspawn') {
+            // Stackable: add 1 platform spawn charge
+            this.platformCharges++;
+            spawnCollectBurst(cx, cy, def.color);
+        } else if (type === 'invert') {
+            // Invert the OTHER player's controls for 30 seconds
+            const other = this === player1 ? player2 : player1;
+            other.invertedUntil = Date.now() + 30000;
+            spawnCollectBurst(cx, cy, def.color);
         } else {
             this.activePowerups[type] = Date.now() + def.duration;
             spawnCollectBurst(cx, cy, def.color);
@@ -1595,6 +1796,45 @@ class Player {
             ctx.globalAlpha = 1;
         }
 
+        // Inverted controls effect (pink/red swirl)
+        if (this.invertedUntil && Date.now() < this.invertedUntil) {
+            ctx.fillStyle = '#ff4488';
+            ctx.globalAlpha = 0.3 + 0.2 * Math.sin(frameCount * 0.3);
+            ctx.fillRect(this.x - 1, this.y - 4, this.w + 2, 4);
+            ctx.fillRect(this.x - 1, this.y + this.h, this.w + 2, 4);
+            ctx.globalAlpha = 1;
+            // "?" above player
+            ctx.fillStyle = '#ff4488';
+            ctx.font = 'bold 10px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText('?', this.x + this.w / 2, this.y - 16);
+        }
+
+        // Super jump glow effect (yellow glow at feet)
+        if (this.hasPowerup('superjump')) {
+            ctx.fillStyle = '#ffff44';
+            ctx.globalAlpha = 0.3 + 0.2 * Math.sin(frameCount * 0.2);
+            ctx.fillRect(this.x - 1, this.y + this.h - 6, this.w + 2, 6);
+            ctx.globalAlpha = 1;
+        }
+
+        // No knockback shield effect
+        if (this.hasPowerup('noknockback')) {
+            ctx.fillStyle = '#aaaaaa';
+            ctx.globalAlpha = 0.25 + 0.15 * Math.sin(frameCount * 0.15);
+            ctx.fillRect(this.x - 3, this.y - 3, this.w + 6, this.h + 6);
+            ctx.globalAlpha = 1;
+        }
+
+        // Speed boost trail effect
+        if (this.hasPowerup('speedboost')) {
+            ctx.fillStyle = '#44ffaa';
+            ctx.globalAlpha = 0.3;
+            ctx.fillRect(this.x - 4 * this.facing, this.y + this.h - 6, 4, 6);
+            ctx.fillRect(this.x - 8 * this.facing, this.y + this.h - 4, 3, 4);
+            ctx.globalAlpha = 1;
+        }
+
         // No cooldown lightning effect
         if (this.hasPowerup('nocooldown')) {
             ctx.fillStyle = '#cc44ff';
@@ -1657,6 +1897,47 @@ class Player {
             ctx.fillRect(barX, puBarY + 2, barW, 1);
             ctx.globalAlpha = 1;
             puBarOffset++;
+        }
+
+        // Double jump charges indicator (persistent, shown as icons)
+        if (this.doubleJumps > 0) {
+            const djY = barY + barH + 3 + puBarOffset * 5;
+            ctx.font = 'bold 9px monospace';
+            ctx.textAlign = 'center';
+            const label = 'x' + this.doubleJumps;
+            const djText = '\u2191' + label;
+            // Small background for readability
+            const tw = ctx.measureText(djText).width;
+            ctx.fillStyle = 'rgba(0,0,0,0.4)';
+            ctx.fillRect(this.x + this.w / 2 - tw / 2 - 2, djY - 2, tw + 4, 9);
+            ctx.fillStyle = '#66ddff';
+            ctx.fillText(djText, this.x + this.w / 2, djY + 5);
+        }
+
+        // Platform spawn charges indicator
+        if (this.platformCharges > 0) {
+            const pcY = barY + barH + 3 + puBarOffset * 5 + (this.doubleJumps > 0 ? 11 : 0);
+            ctx.font = 'bold 9px monospace';
+            ctx.textAlign = 'center';
+            const pcText = '_x' + this.platformCharges;
+            const pcW = ctx.measureText(pcText).width;
+            ctx.fillStyle = 'rgba(0,0,0,0.4)';
+            ctx.fillRect(this.x + this.w / 2 - pcW / 2 - 2, pcY - 2, pcW + 4, 9);
+            ctx.fillStyle = '#bb88ff';
+            ctx.fillText(pcText, this.x + this.w / 2, pcY + 5);
+        }
+
+        // Swap charges indicator
+        if (this.swapCharges > 0) {
+            const scY = barY + barH + 3 + puBarOffset * 5 + (this.doubleJumps > 0 ? 11 : 0) + (this.platformCharges > 0 ? 11 : 0);
+            ctx.font = 'bold 9px monospace';
+            ctx.textAlign = 'center';
+            const swapLabel = this === player1 ? '⇄x' + this.swapCharges + ' [E]' : '⇄x' + this.swapCharges + ' [R⇧]';
+            const scW = ctx.measureText(swapLabel).width;
+            ctx.fillStyle = 'rgba(0,0,0,0.4)';
+            ctx.fillRect(this.x + this.w / 2 - scW / 2 - 2, scY - 2, scW + 4, 9);
+            ctx.fillStyle = '#ff66ff';
+            ctx.fillText(swapLabel, this.x + this.w / 2, scY + 5);
         }
 
         // Ammo counter (limited ammo mode)
@@ -2453,14 +2734,27 @@ const AI = {
 
         if (this.giveUpCooldown > 0) this.giveUpCooldown--;
 
-        // --- While in the air: just steer toward current target, don't pick new ones ---
+        // --- While in the air: steer toward current target, use double jump if needed ---
         if (!aiPlayer.onGround) {
-            // Mid-air: only steer toward platform we're already jumping to
-            // (_climbTo handles mid-air steering via wantsLeft/wantsRight)
-            // Just shoot opportunistically while airborne
+            // Mid-air: shoot opportunistically
             this._opportunisticShoot(aiPlayer, humanPlayer, aiCX, aiCY, humanCX, humanCY);
+            // Use double jump if falling and in danger (near lava or falling too long)
+            if (aiPlayer.doubleJumps > 0 && aiPlayer.vy > 1) {
+                const lavaDistAir = lavaState.lavaY - (aiPlayer.y + aiPlayer.h);
+                if (lavaDistAir < 140) {
+                    // Two-frame sequence: release then press to trigger double jump
+                    if (this._djRelease) {
+                        this.wantsJump = true; // re-press
+                        this._djRelease = false;
+                    } else {
+                        this.wantsJump = false; // release first
+                        this._djRelease = true;
+                    }
+                }
+            }
             return;
         }
+        this._djRelease = false;
 
         // --- ON GROUND: flee breakable platform if it's breaking ---
         if (aiPlayer.standingOn && aiPlayer.standingOn.breakable && aiPlayer.standingOn.breakTimer > 0) {
@@ -2837,8 +3131,23 @@ function spawnPowerup() {
     let types = Object.keys(POWERUP_TYPES);
     // One Shot mode: no heal powerups
     if (settings.gameMode === 1) types = types.filter(t => t !== 'heal');
+    // Extra life only in Lava Rise mode
+    if (settings.gameMode !== 4) types = types.filter(t => !POWERUP_TYPES[t].lavaOnly);
     if (types.length === 0) return;
-    const type = types[Math.floor(Math.random() * types.length)];
+    // === TEST: only spawn new powerups ===
+    const testOnly = ['swap', 'lavafreeze', 'platspawn', 'invert'];
+    const testTypes = types.filter(t => testOnly.includes(t));
+    if (testTypes.length > 0) types = testTypes;
+    // === END TEST ===
+    // Weighted selection based on each powerup's weight
+    let totalWeight = 0;
+    for (const t of types) totalWeight += (POWERUP_TYPES[t].weight || 1);
+    let roll = Math.random() * totalWeight;
+    let type = types[0];
+    for (const t of types) {
+        roll -= (POWERUP_TYPES[t].weight || 1);
+        if (roll <= 0) { type = t; break; }
+    }
     // Pick a random platform (not ground, not below lava)
     const plats = platforms.filter(p => !p.isGround && (settings.gameMode !== 4 || p.y < lavaState.lavaY - 30));
     if (plats.length === 0) return;
@@ -3049,11 +3358,13 @@ function checkBulletHits() {
             b.y < player2.y + player2.h
         ) {
             player2.takeDamage(p1Damage);
-            // Apply knockback
-            const kb1 = KNOCKBACK_OPTIONS[settings.knockback].force;
-            if (kb1 > 0) {
-                player2.knockbackVx += (b.vx > 0 ? 1 : -1) * kb1;
-                player2.vy -= kb1 * 0.5;
+            // Apply knockback (blocked by noknockback powerup)
+            if (!player2.hasPowerup('noknockback')) {
+                const kb1 = KNOCKBACK_OPTIONS[settings.knockback].force;
+                if (kb1 > 0) {
+                    player2.knockbackVx += (b.vx > 0 ? 1 : -1) * kb1;
+                    player2.vy -= kb1 * 0.5;
+                }
             }
             stats.p1.hits++;
             stats.p1.damageDone += p1Damage;
@@ -3077,11 +3388,13 @@ function checkBulletHits() {
             b.y < player1.y + player1.h
         ) {
             player1.takeDamage(p2Damage);
-            // Apply knockback
-            const kb2 = KNOCKBACK_OPTIONS[settings.knockback].force;
-            if (kb2 > 0) {
-                player1.knockbackVx += (b.vx > 0 ? 1 : -1) * kb2;
-                player1.vy -= kb2 * 0.5;
+            // Apply knockback (blocked by noknockback powerup)
+            if (!player1.hasPowerup('noknockback')) {
+                const kb2 = KNOCKBACK_OPTIONS[settings.knockback].force;
+                if (kb2 > 0) {
+                    player1.knockbackVx += (b.vx > 0 ? 1 : -1) * kb2;
+                    player1.vy -= kb2 * 0.5;
+                }
             }
             stats.p2.hits++;
             stats.p2.damageDone += p2Damage;
@@ -3558,6 +3871,23 @@ function drawPlatforms() {
             // Bottom edge
             ctx.fillStyle = '#6aafc8';
             ctx.fillRect(p.x, p.y + p.h - 2, p.w, 2);
+        } else if (p.temporary) {
+            // Temporary spawned platform: purple with fading blink
+            const age = Date.now() - p.spawnTime;
+            const blink = age > 6000 ? (Math.floor(Date.now() / 150) % 2 ? 0.3 : 0.8) : 0.8;
+            ctx.globalAlpha = blink;
+            ctx.fillStyle = '#9966cc';
+            ctx.fillRect(p.x, p.y, p.w, p.h);
+            ctx.fillStyle = '#bb88ff';
+            ctx.fillRect(p.x, p.y, p.w, 2);
+            ctx.fillStyle = '#6633aa';
+            ctx.fillRect(p.x, p.y + p.h - 2, p.w, 2);
+            // Sparkle dots
+            ctx.fillStyle = '#ddaaff';
+            for (let sx = p.x + 8; sx < p.x + p.w - 8; sx += 16) {
+                ctx.fillRect(sx, p.y + 6, 2, 2);
+            }
+            ctx.globalAlpha = 1;
         } else {
             drawTiledRect(platTileCanvas, p.x, p.y, p.w, p.h);
             // Edge highlights
@@ -3756,52 +4086,72 @@ function drawStartScreen() {
     ctx.fillText(T('drop') + '      ' + K(b2.down), 475, 312);
     ctx.fillText(T('shoot') + '     ' + K(b2.shoot), 475, 332);
 
-    // Power-Up legend
+    // Power-Up legend (two rows)
+    let puTypes = Object.entries(POWERUP_TYPES).filter(([k, v]) => !v.lavaOnly || settings.gameMode === 4);
+    // One Shot mode: exclude heal (never spawns)
+    if (settings.gameMode === 1) puTypes = puTypes.filter(([k]) => k !== 'heal');
+    const puCount = puTypes.length;
+    // Calculate spawn percentages
+    let filtTotalWeight = 0;
+    for (const [, pu] of puTypes) filtTotalWeight += (pu.weight || 1);
+
+    // Split into rows of max 5
+    const rowSize = 5;
+    const numRows = Math.ceil(puCount / rowSize);
+    const legendH = 20 + numRows * 28;
+    const legendY = 358;
+
     ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-    ctx.fillRect(130, 358, 540, 54);
+    ctx.fillRect(100, legendY, 600, legendH);
     ctx.fillStyle = '#ffffff';
-    ctx.fillRect(130, 358, 540, 2);
+    ctx.fillRect(100, legendY, 600, 2);
 
     ctx.font = 'bold 11px monospace';
     ctx.textAlign = 'center';
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(T('puTitle'), canvas.width / 2, 375);
+    ctx.fillText(T('puTitle'), canvas.width / 2, legendY + 15);
 
-    const puTypes = Object.values(POWERUP_TYPES);
-    const puCount = puTypes.length;
-    const puTotalW = 500;
-    const puSpacing = puTotalW / puCount;
-    const puStartX = 155 + puSpacing / 2;
-    ctx.font = '10px monospace';
-    ctx.textAlign = 'center';
-    for (let i = 0; i < puCount; i++) {
-        const px = puStartX + i * puSpacing;
-        const py = 388;
-        // Mini power-up box
-        ctx.fillStyle = puTypes[i].colorDark;
+    function drawPuEntry(pu, px, py) {
+        ctx.fillStyle = pu.colorDark;
         ctx.fillRect(px - 6, py, 12, 12);
-        ctx.fillStyle = puTypes[i].color;
+        ctx.fillStyle = pu.color;
         ctx.fillRect(px - 6, py, 12, 2);
         ctx.fillRect(px - 6, py + 10, 12, 2);
         ctx.fillRect(px - 6, py, 2, 12);
         ctx.fillRect(px + 4, py, 2, 12);
         ctx.font = 'bold 8px monospace';
-        ctx.fillText(puTypes[i].symbol, px, py + 9);
-        // Label
-        ctx.font = '9px monospace';
-        ctx.fillStyle = puTypes[i].color;
-        ctx.fillText(puTypes[i].description, px, py + 24);
+        ctx.textAlign = 'center';
+        ctx.fillText(pu.symbol, px, py + 9);
+        const pct = Math.round((pu.weight || 1) / filtTotalWeight * 100);
+        ctx.font = '7px monospace';
+        ctx.fillStyle = pu.color;
+        ctx.fillText(pu.description + ' (' + pct + '%)', px, py + 22);
+    }
+
+    // Render rows
+    const rowW = 560;
+    let idx = 0;
+    for (let r = 0; r < numRows; r++) {
+        const rowCount = Math.min(rowSize, puCount - idx);
+        const spacing = rowW / rowCount;
+        const startX = 120 + spacing / 2;
+        const rowY = legendY + 22 + r * 28;
+        for (let i = 0; i < rowCount; i++) {
+            const [, pu] = puTypes[idx++];
+            drawPuEntry(pu, startX + i * spacing, rowY);
+        }
     }
 
     // Start prompts
     const blink = Math.floor(Date.now() / 400) % 2;
+    const promptY = legendY + legendH + 8;
     ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-    ctx.fillRect(150, 424, 500, 52);
+    ctx.fillRect(150, promptY, 500, 44);
     ctx.fillStyle = '#ffdd00';
-    ctx.fillRect(150, 424, 500, 2);
-    ctx.fillRect(150, 474, 500, 2);
-    drawPixelText(T('pressEnter'), canvas.width / 2, 444, 16, blink ? '#ffdd00' : '#ffaa00');
-    drawPixelText(T('pressSpace'), canvas.width / 2, 466, 11, '#888');
+    ctx.fillRect(150, promptY, 500, 2);
+    ctx.fillRect(150, promptY + 42, 500, 2);
+    drawPixelText(T('pressEnter'), canvas.width / 2, promptY + 16, 16, blink ? '#ffdd00' : '#ffaa00');
+    drawPixelText(T('pressSpace'), canvas.width / 2, promptY + 34, 11, '#888');
 }
 
 function drawSettingsScreen() {
@@ -4917,8 +5267,11 @@ function updateLavaMode() {
     const accelRate = LAVA_ACCEL_OPTIONS[settings.lavaAccel].accel;
     lavaState.lavaSpeed = startSpeed + lavaState.framesSinceStart * accelRate;
 
-    // Rise lava (decrease Y = move up in world space)
-    lavaState.lavaY -= lavaState.lavaSpeed;
+    // Rise lava (decrease Y = move up in world space) - unless frozen
+    const frozen = lavaState.freezeUntil && Date.now() < lavaState.freezeUntil;
+    if (!frozen) {
+        lavaState.lavaY -= lavaState.lavaSpeed;
+    }
 
     // Update camera to follow lava (keep lava near screen bottom)
     lavaState.cameraY = Math.max(0, 480 - lavaState.lavaY);
@@ -4971,6 +5324,22 @@ function updateLavaMode() {
             lavaState.windZones.push({ x: wzX, y: wzY, w: wzW, h: wzH, strength: str, particles });
         }
     }
+    // Remove temporary platforms after 8 seconds
+    const now = Date.now();
+    for (let i = platforms.length - 1; i >= 0; i--) {
+        if (platforms[i].temporary && now - platforms[i].spawnTime > 8000) {
+            // Unseat players standing on it
+            for (const pl of [player1, player2]) {
+                if (pl.standingOn === platforms[i]) {
+                    pl.standingOn = null;
+                    pl.onGround = false;
+                }
+            }
+            spawnParticles(platforms[i].x + platforms[i].w / 2, platforms[i].y, '#bb88ff', 6);
+            platforms.splice(i, 1);
+        }
+    }
+
     // Remove wind zones that are below lava
     for (let i = lavaState.windZones.length - 1; i >= 0; i--) {
         if (lavaState.windZones[i].y > lavaState.lavaY + 50) {
@@ -5110,6 +5479,12 @@ function checkLavaDeath(player, pKey) {
         player.vy = 0;
         player.knockbackVx = 0;
         player.bullets = [];
+        player.activePowerups = {};
+        player.doubleJumps = 0;
+
+        player.invertedUntil = 0;
+        player.jumpPressed = false;
+        player.usedDoubleJump = false;
         spawnParticles(player.x + 16, player.y + 20, player.color, 15);
 
         // Reset AI if player2
@@ -5172,37 +5547,62 @@ function drawWindZones() {
 
 function drawLava() {
     const lY = lavaState.lavaY;
-    // Lava glow above surface
-    const gradient = ctx.createLinearGradient(0, lY - 50, 0, lY);
-    gradient.addColorStop(0, 'rgba(255, 68, 0, 0)');
-    gradient.addColorStop(1, 'rgba(255, 68, 0, 0.3)');
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, lY - 50, 800, 50);
+    const frozen = lavaState.freezeUntil && Date.now() < lavaState.freezeUntil;
 
-    // Wavy lava surface
-    for (let x = 0; x < 800; x += 4) {
-        const wave = Math.sin(x * 0.05 + frameCount * 0.1) * 4;
-        const wave2 = Math.sin(x * 0.08 + frameCount * 0.06) * 2;
-        // Deep red/orange lava body
-        ctx.fillStyle = '#cc2200';
-        ctx.fillRect(x, lY + wave + wave2, 4, 600);
-        // Bright surface
-        ctx.fillStyle = '#ff6600';
-        ctx.fillRect(x, lY + wave + wave2, 4, 6);
-        // Yellow highlight on surface
-        if ((x + Math.floor(frameCount * 2)) % 16 < 8) {
-            ctx.fillStyle = '#ffaa00';
-            ctx.fillRect(x, lY + wave + wave2, 4, 3);
+    if (frozen) {
+        // Frozen lava: blue/grey, no waves
+        const gradient = ctx.createLinearGradient(0, lY - 50, 0, lY);
+        gradient.addColorStop(0, 'rgba(100, 150, 255, 0)');
+        gradient.addColorStop(1, 'rgba(100, 150, 255, 0.3)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, lY - 50, 800, 50);
+
+        // Flat frozen surface
+        ctx.fillStyle = '#334466';
+        ctx.fillRect(0, lY, 800, 600);
+        ctx.fillStyle = '#5588bb';
+        ctx.fillRect(0, lY, 800, 6);
+        // Ice cracks
+        ctx.fillStyle = '#77aadd';
+        for (let x = 0; x < 800; x += 30) {
+            ctx.fillRect(x + 5, lY + 2, 12, 2);
         }
+        // "FROZEN" text
+        const remaining = Math.ceil((lavaState.freezeUntil - Date.now()) / 1000);
+        ctx.fillStyle = '#aaddff';
+        ctx.font = 'bold 10px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('FROZEN ' + remaining + 's', 400, lY + 20);
+    } else {
+        // Normal lava glow above surface
+        const gradient = ctx.createLinearGradient(0, lY - 50, 0, lY);
+        gradient.addColorStop(0, 'rgba(255, 68, 0, 0)');
+        gradient.addColorStop(1, 'rgba(255, 68, 0, 0.3)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, lY - 50, 800, 50);
+
+        // Wavy lava surface
+        for (let x = 0; x < 800; x += 4) {
+            const wave = Math.sin(x * 0.05 + frameCount * 0.1) * 4;
+            const wave2 = Math.sin(x * 0.08 + frameCount * 0.06) * 2;
+            ctx.fillStyle = '#cc2200';
+            ctx.fillRect(x, lY + wave + wave2, 4, 600);
+            ctx.fillStyle = '#ff6600';
+            ctx.fillRect(x, lY + wave + wave2, 4, 6);
+            if ((x + Math.floor(frameCount * 2)) % 16 < 8) {
+                ctx.fillStyle = '#ffaa00';
+                ctx.fillRect(x, lY + wave + wave2, 4, 3);
+            }
+        }
+        // Bright yellow crust spots
+        ctx.fillStyle = '#ffdd00';
+        ctx.globalAlpha = 0.5 + Math.sin(frameCount * 0.05) * 0.3;
+        for (let x = 0; x < 800; x += 24) {
+            const wave = Math.sin(x * 0.03 + frameCount * 0.07) * 3;
+            ctx.fillRect(x + 4, lY + wave + 8, 8, 4);
+        }
+        ctx.globalAlpha = 1;
     }
-    // Bright yellow crust spots
-    ctx.fillStyle = '#ffdd00';
-    ctx.globalAlpha = 0.5 + Math.sin(frameCount * 0.05) * 0.3;
-    for (let x = 0; x < 800; x += 24) {
-        const wave = Math.sin(x * 0.03 + frameCount * 0.07) * 3;
-        ctx.fillRect(x + 4, lY + wave + 8, 8, 4);
-    }
-    ctx.globalAlpha = 1;
 }
 
 function drawLavaHud() {
@@ -5320,6 +5720,7 @@ function resetGame() {
             framesSinceStart: 0,
             useStructures: false,
             windZones: [],
+            freezeUntil: 0,
         };
         initLavaPlatforms();
         // Position players on the wide starting platform
@@ -5327,6 +5728,7 @@ function resetGame() {
         player1.y = 420;
         player2.x = 500;
         player2.y = 420;
+
     }
 }
 
