@@ -101,6 +101,7 @@ const settings = {
     tagWinRule: 0,   // 0 = not "it" at end wins, 1 = shortest time as "it" wins
     tagDuration: 1,  // index into TAG_DURATION_OPTIONS (default 60s)
     knockback: 1,    // index into KNOCKBACK_OPTIONS (default Normal)
+    lavaLives: 1,    // index into LAVA_LIVES_OPTIONS (default 3 lives)
 };
 const BEST_OF_OPTIONS = [1, 3, 5];
 const MODE_OPTIONS = ['Player vs Player', 'Player vs AI'];
@@ -147,6 +148,7 @@ const GAME_MODE_OPTIONS = [
     { name: 'One Shot', nameDE: 'Ein Schuss', desc: 'One hit = kill', descDE: 'Ein Treffer = Tod' },
     { name: 'King of the Hill', nameDE: 'König des Hügels', desc: 'Hold the hill', descDE: 'Hügel halten' },
     { name: 'Tag', nameDE: 'Fangen', desc: "Don't be it!", descDE: 'Nicht Fänger sein!' },
+    { name: 'Lava Rise', nameDE: 'Steigende Lava', desc: 'Outrun the lava!', descDE: 'Fliehe vor der Lava!' },
 ];
 const TAG_WIN_RULE_OPTIONS = [
     { name: 'Not It', nameDE: 'Nicht Fänger' },
@@ -167,6 +169,13 @@ const KNOCKBACK_OPTIONS = [
     { name: 'Extreme', nameDE: 'Extrem', force: 24 },
 ];
 
+const LAVA_LIVES_OPTIONS = [
+    { name: '1', lives: 1 },
+    { name: '3', lives: 3 },
+    { name: '5', lives: 5 },
+    { name: '10', lives: 10 },
+];
+
 // --- Tag Mode State ---
 let tagState = {
     tagger: null,         // reference to the player who is "it"
@@ -184,6 +193,17 @@ let kothState = {
     hillZone: null,       // { x, y, w, h } - the capture zone
     currentHolder: null,  // who is on the hill
     holdStart: 0,         // when current holder started holding
+};
+
+let lavaState = {
+    lavaY: 500,           // world Y of lava surface
+    lavaSpeed: 0.3,       // pixels per frame
+    cameraY: 0,           // camera offset (positive = scrolled up)
+    nextPlatformY: 0,     // Y level to generate next platform row
+    p1Lives: 3,
+    p2Lives: 3,
+    framesSinceStart: 0,
+    useStructures: false,  // switch to pre-built structures after ~30s
 };
 
 // --- Translations ---
@@ -253,6 +273,7 @@ const TEXTS = {
         timeAsTagger: 'Time as Tagger', lastTagger: 'Last Tagger',
         hillTime: 'Hill Time', hillScore: 'Hill Score',
         deaths: 'Deaths',
+        lavaRise: 'Lava Rise', lblLavaLives: 'LIVES', livesLeft: 'Lives',
         yes: 'Yes', no: 'No',
         pressRMenu: 'Press R to return to menu',
         pressRNext: 'Press R for next round',
@@ -324,6 +345,7 @@ const TEXTS = {
         timeAsTagger: 'Zeit als F\u00e4nger', lastTagger: 'Letzter F\u00e4nger',
         hillTime: 'Zeit auf H\u00fcgel', hillScore: 'H\u00fcgel-Punkte',
         deaths: 'Tode',
+        lavaRise: 'Steigende Lava', lblLavaLives: 'LEBEN', livesLeft: 'Leben',
         yes: 'Ja', no: 'Nein',
         pressRMenu: 'R = Zur\u00fcck zum Men\u00fc',
         pressRNext: 'R = N\u00e4chste Runde',
@@ -367,11 +389,16 @@ function getGameplaySettingsItems() {
         items.push({ key: 'tagDuration', label: T('lblTagDuration'), value: TAG_DURATION_OPTIONS[settings.tagDuration].name, hasArrows: true });
     }
 
+    if (gm === 4) {
+        const llVal = LAVA_LIVES_OPTIONS[settings.lavaLives].name;
+        items.push({ key: 'lavaLives', label: T('lblLavaLives'), value: llVal, hasArrows: true });
+    }
+
     // Rounds (all modes)
     items.push({ key: 'bestOf', label: T('lblRounds'), value: T('bestOf') + BEST_OF_OPTIONS[settings.bestOf], hasArrows: true });
 
-    if (gm === 0 || gm === 1) {
-        // Classic & One Shot: HP settings
+    if (gm === 0 || gm === 1 || gm === 4) {
+        // Classic, One Shot & Lava Rise: HP settings
         items.push({ key: 'hp', label: T('lblMaxHp'), value: HP_OPTIONS[settings.hp] + ' HP', hasArrows: true });
     }
 
@@ -422,6 +449,7 @@ function handleGameplaySettingChange(key, dir) {
         case 'tagWinRule': settings.tagWinRule = cycle(settings.tagWinRule, TAG_WIN_RULE_OPTIONS.length); break;
         case 'tagDuration': settings.tagDuration = cycle(settings.tagDuration, TAG_DURATION_OPTIONS.length); break;
         case 'knockback': settings.knockback = cycle(settings.knockback, KNOCKBACK_OPTIONS.length); break;
+        case 'lavaLives': settings.lavaLives = cycle(settings.lavaLives, LAVA_LIVES_OPTIONS.length); break;
     }
 }
 
@@ -431,8 +459,11 @@ function getAvailableMaps() {
         // King of the Hill: only the Summit map
         return [KOTH_MAP_KEY];
     }
+    if (settings.gameMode === 4) {
+        return ['lava_procedural'];
+    }
     // All other modes: the 4 standard maps
-    return MAP_KEYS.filter(k => k !== KOTH_MAP_KEY);
+    return MAP_KEYS.filter(k => k !== KOTH_MAP_KEY && k !== 'lava_procedural');
 }
 
 function saveSettings() {
@@ -576,7 +607,9 @@ window.addEventListener('keydown', (e) => {
             gameMode = settings.mode === 0 ? 'pvp' : 'pve';
             const avMaps = getAvailableMaps();
             const mapIdx = Math.min(settings.map, avMaps.length - 1);
-            platforms = MAPS[avMaps[mapIdx]].platforms;
+            if (settings.gameMode !== 4) {
+                platforms = MAPS[avMaps[mapIdx]].platforms;
+            }
             roundWins = { p1: 0, p2: 0 };
             prerenderBackground();
             resetGame();
@@ -703,7 +736,9 @@ window.addEventListener('keydown', (e) => {
             gameMode = settings.mode === 0 ? 'pvp' : 'pve';
             const avMaps = getAvailableMaps();
             const mapIdx = Math.min(settings.map, avMaps.length - 1);
-            platforms = MAPS[avMaps[mapIdx]].platforms;
+            if (settings.gameMode !== 4) {
+                platforms = MAPS[avMaps[mapIdx]].platforms;
+            }
             roundWins = { p1: 0, p2: 0 };
             showHowToPlay = false;
             settingsCategory = -1;
@@ -1131,6 +1166,10 @@ const MAPS = {
             { x: 640, y: 140, w: 60, h: 16 },
         ],
     },
+    lava_procedural: {
+        name: 'Lava Rise',
+        platforms: [], // not used, platforms are generated procedurally
+    },
     koth_summit: {
         name: 'Summit',
         platforms: [
@@ -1193,12 +1232,16 @@ class Player {
         const wasMoving = this.vx !== 0;
         this.vx = 0;
 
+        // AI in Lava Rise gets a small speed boost
+        const isLavaAI = settings.gameMode === 4 && gameMode === 'pve' && this === player2;
+        const speed = isLavaAI ? PLAYER_SPEED * 1.2 : PLAYER_SPEED;
+
         if (keys[this.controls.left]) {
-            this.vx = -PLAYER_SPEED;
+            this.vx = -speed;
             this.facing = -1;
         }
         if (keys[this.controls.right]) {
-            this.vx = PLAYER_SPEED;
+            this.vx = speed;
             this.facing = 1;
         }
 
@@ -1210,7 +1253,9 @@ class Player {
         if (keys[this.controls.jump] && this.onGround) {
             // Scale jump force with gravity so jump height stays proportional
             const gravScale = GRAVITY_OPTIONS[settings.gravity].value / 0.6;
-            this.vy = JUMP_FORCE * Math.sqrt(gravScale);
+            // AI in Lava Rise jumps slightly higher
+            const jumpMult = isLavaAI ? 1.12 : 1;
+            this.vy = JUMP_FORCE * Math.sqrt(gravScale) * jumpMult;
             this.onGround = false;
         }
 
@@ -1294,9 +1339,11 @@ class Player {
             }
         }
 
-        if (this.y > canvas.height) {
-            this.y = 0;
-            this.vy = 0;
+        if (settings.gameMode !== 4) {
+            if (this.y > canvas.height) {
+                this.y = 0;
+                this.vy = 0;
+            }
         }
 
         // Update bullets
@@ -1308,6 +1355,15 @@ class Player {
             if (b.x < -10 || b.x > canvas.width + 10 || b.life <= 0) {
                 this.bullets.splice(i, 1);
                 continue;
+            }
+
+            // In lava mode, also cull bullets far from camera view
+            if (settings.gameMode === 4) {
+                const screenY = b.y + lavaState.cameraY;
+                if (screenY < -50 || screenY > 550) {
+                    this.bullets.splice(i, 1);
+                    continue;
+                }
             }
 
             let hitPlatform = false;
@@ -1801,6 +1857,13 @@ const AI = {
         this.wantsJump = false;
         this.wantsShoot = false;
         this.wantsDown = false;
+
+        // --- Lava Rise: special AI behavior ---
+        if (settings.gameMode === 4) {
+            this._updateLava(aiPlayer, humanPlayer);
+            this._applyInputs(aiPlayer);
+            return;
+        }
 
         // --- King of the Hill: special AI behavior ---
         if (settings.gameMode === 2) {
@@ -2301,6 +2364,225 @@ const AI = {
         this._dodgeBullets(aiPlayer, humanPlayer);
     },
 
+    // Lava Rise AI: climb upward, fight when safe, stay on screen
+    _updateLava(aiPlayer, humanPlayer) {
+        const aiCX = aiPlayer.x + aiPlayer.w / 2;
+        const aiCY = aiPlayer.y + aiPlayer.h / 2;
+        const aiFeetY = aiPlayer.y + aiPlayer.h;
+        const humanCX = humanPlayer.x + humanPlayer.w / 2;
+        const humanCY = humanPlayer.y + humanPlayer.h / 2;
+
+        // --- Screen boundaries (world coords) ---
+        const screenTop = -lavaState.cameraY;         // world Y of screen top
+        const screenBottom = 500 - lavaState.cameraY;  // world Y of screen bottom
+        const tooHighUp = aiCY < screenTop + 40;       // AI near top edge of screen
+
+        // --- Lava danger assessment ---
+        const lavaDistance = lavaState.lavaY - aiFeetY;
+        const criticalZone = lavaDistance < 70;
+        const dangerZone = lavaDistance < 140;
+        const safeZone = lavaDistance > 250;
+
+        if (this.giveUpCooldown > 0) this.giveUpCooldown--;
+
+        // --- While in the air: just steer toward current target, don't pick new ones ---
+        if (!aiPlayer.onGround) {
+            // Mid-air: only steer toward platform we're already jumping to
+            // (_climbTo handles mid-air steering via wantsLeft/wantsRight)
+            // Just shoot opportunistically while airborne
+            this._opportunisticShoot(aiPlayer, humanPlayer, aiCX, aiCY, humanCX, humanCY);
+            return;
+        }
+
+        // --- ON GROUND: find climb target and make decisions ---
+        let climbTarget = this._findBestClimbTarget(aiPlayer, aiFeetY, screenTop);
+
+        // --- PRIORITY 1: Don't go off-screen at the top ---
+        if (tooHighUp) {
+            // Stay put, don't climb further. Just fight.
+            this._opportunisticShoot(aiPlayer, humanPlayer, aiCX, aiCY, humanCX, humanCY);
+            this._dodgeBullets(aiPlayer, humanPlayer);
+            return;
+        }
+
+        // --- PRIORITY 2: Critical lava danger → climb NOW ---
+        if (criticalZone) {
+            if (climbTarget) {
+                this._navigateToPlat(aiPlayer, climbTarget, true);
+            } else {
+                // Panic jump
+                this.wantsJump = true;
+                if (aiCX < 400) this.wantsRight = true;
+                else this.wantsLeft = true;
+            }
+            this._dodgeBullets(aiPlayer, humanPlayer);
+            return;
+        }
+
+        // --- PRIORITY 3: Danger zone → climb urgently, shoot if easy ---
+        if (dangerZone) {
+            if (climbTarget) {
+                this._navigateToPlat(aiPlayer, climbTarget, true);
+            }
+            // Quick shot only if perfectly aligned
+            if (Math.abs(humanCY - aiCY) < 40) {
+                aiPlayer.facing = humanCX > aiCX ? 1 : -1;
+                if (Math.random() < AI_DIFF_OPTIONS[settings.aiDiff].accuracy * 0.4) {
+                    this.wantsShoot = true;
+                }
+            }
+            this._dodgeBullets(aiPlayer, humanPlayer);
+            return;
+        }
+
+        // --- PRIORITY 4: Safe → climb + actively fight ---
+        // Always keep climbing as the base action
+        if (climbTarget) {
+            this._navigateToPlat(aiPlayer, climbTarget, false);
+        }
+
+        // Layer on combat: shoot at human when aligned
+        if (safeZone) {
+            // Very safe: full combat mode alongside climbing
+            const humanDist = Math.hypot(humanCX - aiCX, humanCY - aiCY);
+            const humanOnSameLevel = Math.abs(humanCY - aiCY) < 60;
+
+            if (humanOnSameLevel && humanDist < 300) {
+                aiPlayer.facing = (humanCX > aiCX) ? 1 : -1;
+                if (Math.random() < AI_DIFF_OPTIONS[settings.aiDiff].accuracy) {
+                    this.wantsShoot = true;
+                }
+            } else {
+                this._opportunisticShoot(aiPlayer, humanPlayer, aiCX, aiCY, humanCX, humanCY);
+            }
+        } else {
+            this._opportunisticShoot(aiPlayer, humanPlayer, aiCX, aiCY, humanCX, humanCY);
+        }
+
+        this._dodgeBullets(aiPlayer, humanPlayer);
+    },
+
+    // Find the closest reachable platform above AI in lava mode
+    // Only considers platforms within a single jump reach
+    _findBestClimbTarget(aiPlayer, aiFeetY, screenTop) {
+        const aiCX = aiPlayer.x + aiPlayer.w / 2;
+        const jumpReach = this.JUMP_REACH;
+        const candidates = [];
+        for (const p of platforms) {
+            if (p.y >= aiFeetY - 10) continue;           // skip at or below feet
+            if (p.y < aiFeetY - jumpReach) continue;      // skip beyond single jump reach
+            if (p.y > lavaState.lavaY - 30) continue;     // skip near lava
+            if (p.y < screenTop + 20) continue;            // skip above screen top
+            candidates.push(p);
+        }
+        if (candidates.length === 0) return null;
+
+        // Pick the nearest platform: closest combined vertical + horizontal distance
+        let best = null;
+        let bestScore = -Infinity;
+        for (const p of candidates) {
+            const vertDist = aiFeetY - p.y; // how far above (positive)
+            const horizDist = Math.abs(p.x + p.w / 2 - aiCX);
+
+            // Prefer: close horizontally, reasonable height, wide platforms
+            let score = 0;
+            score -= horizDist * 1.5;         // strongly prefer close horizontal
+            score += vertDist * 0.5;          // slight preference for higher
+            score += p.w * 0.3;              // wider = easier to land on
+            if (vertDist < 30) score -= 100; // too close below, not worth it
+
+            if (score > bestScore) {
+                bestScore = score;
+                best = p;
+            }
+        }
+        return best;
+    },
+
+    // Navigate to a platform using pathfinding (lava mode helper)
+    _navigateToPlat(aiPlayer, targetPlat, urgent) {
+        const aiCX = aiPlayer.x + aiPlayer.w / 2;
+        const aiCY = aiPlayer.y + aiPlayer.h / 2;
+        const aiFeetY = aiPlayer.y + aiPlayer.h;
+        const targetX = targetPlat.x + targetPlat.w / 2;
+        const targetY = targetPlat.y;
+        const curPlat = this._getPlatformOf(aiPlayer);
+
+        // Check if already on this platform
+        if (curPlat === targetPlat) return;
+
+        const needsMultiClimb = targetY < aiFeetY - this.JUMP_REACH;
+        const needsEdgeJump = !needsMultiClimb && curPlat && targetPlat &&
+            curPlat !== targetPlat && targetY < aiCY - 30;
+
+        if ((needsMultiClimb || needsEdgeJump) && this.giveUpCooldown <= 0) {
+            const targetKey = 'lava_' + Math.round(targetX / 40) + ',' + Math.round(targetY / 40);
+            if (this.pathTarget !== targetKey || (this.path.length === 0 && needsMultiClimb)) {
+                this.path = needsMultiClimb ? this._buildPath(aiFeetY, targetX, targetY) : [];
+                this.pathStep = 0;
+                this.pathTarget = targetKey;
+                this.stuckTimer = 0;
+            }
+
+            const oldStep = this.pathStep;
+            if (this.pathStep < this.path.length) {
+                if (curPlat === this.path[this.pathStep]) {
+                    this.pathStep++;
+                    this.stuckTimer = 0;
+                }
+            }
+            if (oldStep === this.pathStep) this.stuckTimer++;
+
+            const stuckLimit = urgent ? 25 : this.STUCK_LIMIT; // shorter patience when urgent
+            if (this.stuckTimer > stuckLimit) {
+                this.path = [];
+                this.pathStep = 0;
+                this.stuckTimer = 0;
+                this.giveUpCooldown = urgent ? 10 : 30;
+                // If urgent and stuck, try jumping toward any higher platform
+                if (urgent && aiPlayer.onGround) {
+                    this.wantsJump = true;
+                    if (targetX > aiCX) this.wantsRight = true;
+                    else this.wantsLeft = true;
+                }
+            } else if (needsEdgeJump && this.path.length === 0 && targetPlat) {
+                this._climbTo(aiPlayer, targetPlat, targetX);
+            } else if (this.pathStep < this.path.length) {
+                this._climbTo(aiPlayer, this.path[this.pathStep], targetX);
+            } else {
+                this._walkTo(aiPlayer, targetX, targetY);
+            }
+        } else if (this.giveUpCooldown <= 0) {
+            this._walkTo(aiPlayer, targetX, targetY);
+            // If on ground and target is above, try jumping
+            if (aiPlayer.onGround && targetY < aiCY - 30) {
+                if (Math.abs(aiCX - targetX) < 100) {
+                    this.wantsJump = true;
+                }
+            }
+        }
+    },
+
+    // Shoot at human when it doesn't interfere with movement
+    _opportunisticShoot(aiPlayer, humanPlayer, aiCX, aiCY, humanCX, humanCY) {
+        const dy = Math.abs(humanCY - aiCY);
+        const dx = humanCX - aiCX;
+        // Only shoot if roughly on same horizontal plane
+        if (dy < 50) {
+            aiPlayer.facing = dx > 0 ? 1 : -1;
+            if (Math.random() < AI_DIFF_OPTIONS[settings.aiDiff].accuracy) {
+                this.wantsShoot = true;
+            }
+        }
+        // Also shoot downward at human if they're below and close horizontally
+        else if (humanCY > aiCY && dy < 100 && Math.abs(dx) < 60) {
+            aiPlayer.facing = dx > 0 ? 1 : -1;
+            if (Math.random() < AI_DIFF_OPTIONS[settings.aiDiff].accuracy * 0.3) {
+                this.wantsShoot = true;
+            }
+        }
+    },
+
     // Climb to a platform: walk toward it, jump, steer mid-air
     _climbTo(aiPlayer, plat, finalTargetX) {
         const aiCX = aiPlayer.x + aiPlayer.w / 2;
@@ -2471,8 +2753,9 @@ function spawnPowerup() {
     if (settings.gameMode === 1) types = types.filter(t => t !== 'heal');
     if (types.length === 0) return;
     const type = types[Math.floor(Math.random() * types.length)];
-    // Pick a random platform (not ground)
-    const plats = platforms.filter(p => !p.isGround);
+    // Pick a random platform (not ground, not below lava)
+    const plats = platforms.filter(p => !p.isGround && (settings.gameMode !== 4 || p.y < lavaState.lavaY - 30));
+    if (plats.length === 0) return;
     const plat = plats[Math.floor(Math.random() * plats.length)];
     const x = plat.x + Math.random() * (plat.w - POWERUP_SIZE);
     const y = plat.y - POWERUP_SIZE - 4;
@@ -2571,7 +2854,8 @@ function drawPowerups() {
 // AMMO PICKUPS
 // ============================================
 function spawnAmmoPickup() {
-    const plats = platforms.filter(p => !p.isGround);
+    const plats = platforms.filter(p => !p.isGround && (settings.gameMode !== 4 || p.y < lavaState.lavaY - 30));
+    if (plats.length === 0) return;
     const plat = plats[Math.floor(Math.random() * plats.length)];
     const size = 16;
     const x = plat.x + Math.random() * (plat.w - size);
@@ -2865,6 +3149,32 @@ function checkWin() {
                 AI.stuckTimer = 0;
                 AI.giveUpCooldown = 10;
             }
+        }
+    }
+
+    // Lava Rise (4): lives-based
+    if (gm === 4) {
+        const p1Dead = lavaState.p1Lives <= 0;
+        const p2Dead = lavaState.p2Lives <= 0;
+        if (p1Dead && p2Dead) {
+            // Both out of lives simultaneously: whoever had fewer deaths wins
+            if (stats.p1.deaths < stats.p2.deaths) {
+                winner = player1; loser = player2; roundWins.p1++;
+            } else {
+                winner = player2; loser = player1; roundWins.p2++;
+            }
+            gameState = 'dying';
+            deathTimer = DEATH_DURATION;
+        } else if (p1Dead) {
+            gameState = 'dying';
+            winner = player2; loser = player1;
+            deathTimer = DEATH_DURATION;
+            roundWins.p2++;
+        } else if (p2Dead) {
+            gameState = 'dying';
+            winner = player1; loser = player2;
+            deathTimer = DEATH_DURATION;
+            roundWins.p1++;
         }
     }
 }
@@ -3828,7 +4138,7 @@ function drawGameOverScreen() {
 
     // --- Stats Panel ---
     const gm = settings.gameMode;
-    const extraRows = (gm === 3) ? 3 : (gm === 2) ? 2 : 0;
+    const extraRows = (gm === 3) ? 3 : (gm === 2 || gm === 4) ? 2 : 0;
     const panelY = 155;
     const panelH = 200 + extraRows * 24;
     ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
@@ -3890,6 +4200,16 @@ function drawGameOverScreen() {
         statVals2.push(Math.floor(kothState.p2Score) + '/' + kothState.scoreToWin);
     }
 
+    // Lava Rise mode: add deaths + lives left
+    if (settings.gameMode === 4) {
+        statLabels.push(T('deaths'));
+        statVals1.push(s1.deaths);
+        statVals2.push(s2.deaths);
+        statLabels.push(T('livesLeft'));
+        statVals1.push(lavaState.p1Lives);
+        statVals2.push(lavaState.p2Lives);
+    }
+
     ctx.font = '11px monospace';
     for (let i = 0; i < statLabels.length; i++) {
         const rowY = panelY + 72 + i * 24;
@@ -3928,6 +4248,419 @@ function drawGameOverScreen() {
     } else {
         drawPixelText(`${T('pressRNext')} (${roundWins.p1} - ${roundWins.p2})`, canvas.width / 2, panelY + panelH + 20, 16, '#ffdd00');
     }
+}
+
+// ============================================
+// LAVA RISE MODE
+// ============================================
+
+// --- Pre-built lava structures ---
+// Each structure: { height: total Y span, platforms: [{x, y, w}] }
+// y values are relative offsets from the structure's base (0 = bottom, negative = up)
+// Structures are designed with 1-2 paths and increasingly hard jumps
+
+const LAVA_STRUCTURES = {
+    // --- EASY structures (used early, 2 paths, generous platforms) ---
+    easy: [
+        { // Wide zigzag - 2 clear paths
+            height: 280,
+            platforms: [
+                { x: 50, y: 0, w: 250 },
+                { x: 500, y: 0, w: 250 },
+                { x: 250, y: -70, w: 300 },
+                { x: 50, y: -140, w: 200 },
+                { x: 550, y: -140, w: 200 },
+                { x: 200, y: -210, w: 400 },
+                { x: 100, y: -280, w: 250 },
+                { x: 500, y: -280, w: 200 },
+            ],
+        },
+        { // Double staircase - left and right paths
+            height: 300,
+            platforms: [
+                { x: 100, y: 0, w: 600 },
+                { x: 50, y: -75, w: 180 },
+                { x: 570, y: -75, w: 180 },
+                { x: 200, y: -150, w: 160 },
+                { x: 440, y: -150, w: 160 },
+                { x: 50, y: -225, w: 180 },
+                { x: 570, y: -225, w: 180 },
+                { x: 250, y: -300, w: 300 },
+            ],
+        },
+        { // Funnel - wide at bottom, narrows
+            height: 280,
+            platforms: [
+                { x: 30, y: 0, w: 340 },
+                { x: 430, y: 0, w: 340 },
+                { x: 100, y: -70, w: 250 },
+                { x: 450, y: -70, w: 250 },
+                { x: 200, y: -140, w: 400 },
+                { x: 280, y: -210, w: 240 },
+                { x: 300, y: -280, w: 200 },
+            ],
+        },
+    ],
+    // --- MEDIUM structures (1-2 paths, tighter jumps, max ~130px edge gap) ---
+    medium: [
+        { // Zigzag center - weaves through the middle
+            height: 350,
+            platforms: [
+                { x: 200, y: 0, w: 400 },
+                { x: 420, y: -80, w: 140 },
+                { x: 240, y: -160, w: 140 },
+                { x: 420, y: -240, w: 130 },
+                { x: 250, y: -320, w: 130 },
+                { x: 300, y: -350, w: 200 },
+            ],
+        },
+        { // Staircase right - climbing right side
+            height: 380,
+            platforms: [
+                { x: 200, y: 0, w: 300 },
+                { x: 400, y: -75, w: 150 },
+                { x: 500, y: -155, w: 140 },
+                { x: 350, y: -230, w: 150 },
+                { x: 200, y: -305, w: 140 },
+                { x: 300, y: -380, w: 200 },
+            ],
+        },
+        { // Bottleneck - two paths merge in center
+            height: 320,
+            platforms: [
+                { x: 100, y: 0, w: 250 },
+                { x: 450, y: 0, w: 250 },
+                { x: 200, y: -80, w: 160 },
+                { x: 440, y: -80, w: 160 },
+                { x: 300, y: -160, w: 200 },
+                { x: 200, y: -240, w: 140 },
+                { x: 460, y: -240, w: 140 },
+                { x: 280, y: -320, w: 240 },
+            ],
+        },
+        { // S-curve - smooth alternating path
+            height: 360,
+            platforms: [
+                { x: 250, y: 0, w: 300 },
+                { x: 430, y: -80, w: 140 },
+                { x: 300, y: -155, w: 130 },
+                { x: 180, y: -230, w: 130 },
+                { x: 330, y: -300, w: 130 },
+                { x: 300, y: -360, w: 200 },
+            ],
+        },
+    ],
+    // --- HARD structures (horizontal traversal, must run across to find the way up) ---
+    hard: [
+        { // Long bridge left-to-right: run all the way right, jump up, run back left
+            height: 300,
+            platforms: [
+                { x: 30, y: 0, w: 740 },             // full-width bridge
+                { x: 620, y: -75, w: 150 },           // step up on the right
+                { x: 30, y: -150, w: 740 },            // full-width bridge back
+                { x: 30, y: -225, w: 150 },            // step up on the left
+                { x: 200, y: -300, w: 400 },           // exit platform
+            ],
+        },
+        { // Corridor with gaps: run across, hop gaps, step up at the end
+            height: 350,
+            platforms: [
+                { x: 30, y: 0, w: 280 },              // start left
+                { x: 400, y: 0, w: 130 },             // middle stepping stone
+                { x: 620, y: 0, w: 150 },             // right end
+                { x: 580, y: -80, w: 140 },           // step up right
+                { x: 250, y: -80, w: 240 },           // run back left-center
+                { x: 30, y: -80, w: 130 },            // left end
+                { x: 30, y: -170, w: 150 },           // step up left
+                { x: 250, y: -170, w: 130 },          // stepping stone
+                { x: 480, y: -170, w: 290 },          // run right
+                { x: 620, y: -255, w: 150 },          // step up right
+                { x: 200, y: -350, w: 400 },          // exit bridge
+            ],
+        },
+        { // Switchback shelves: wide ledges alternating sides
+            height: 350,
+            platforms: [
+                { x: 30, y: 0, w: 550 },              // long ledge from left
+                { x: 520, y: -80, w: 120 },           // small step up right end
+                { x: 220, y: -160, w: 550 },          // long ledge from right
+                { x: 220, y: -240, w: 120 },          // small step up left end
+                { x: 250, y: -350, w: 300 },          // exit
+            ],
+        },
+        { // Maze run: multiple horizontal layers with single gaps
+            height: 380,
+            platforms: [
+                { x: 30, y: 0, w: 350 },              // left half
+                { x: 480, y: 0, w: 290 },             // right half (gap at 380-480)
+                { x: 600, y: -80, w: 170 },           // step up far right
+                { x: 100, y: -160, w: 650 },          // long run left
+                { x: 30, y: -240, w: 150 },           // step up far left
+                { x: 30, y: -310, w: 300 },           // run right
+                { x: 430, y: -310, w: 340 },          // continue right (gap at 330-430)
+                { x: 250, y: -380, w: 300 },          // exit
+            ],
+        },
+        { // U-turn: run right, step up, run all the way back left
+            height: 280,
+            platforms: [
+                { x: 30, y: 0, w: 740 },              // full bridge
+                { x: 600, y: -70, w: 170 },           // step up right corner
+                { x: 30, y: -140, w: 740 },           // full bridge back
+                { x: 30, y: -210, w: 170 },           // step up left corner
+                { x: 200, y: -280, w: 400 },          // exit
+            ],
+        },
+    ],
+};
+
+function generateLavaPlatformRow(y) {
+    const count = Math.random() < 0.4 ? 3 : 2;
+    const baseW = 90 + Math.random() * 70; // 90-160
+    for (let i = 0; i < count; i++) {
+        const sectionW = (800 - 30) / count;
+        const w = baseW + Math.random() * 20;
+        const x = 15 + i * sectionW + Math.random() * Math.max(0, sectionW - w);
+        platforms.push({
+            x: Math.max(5, Math.min(x, 795 - w)),
+            y, w, h: 16,
+        });
+    }
+}
+
+// Place a pre-built structure at a given base Y, optionally mirrored
+function placeStructure(structure, baseY) {
+    const mirror = Math.random() < 0.5; // 50% chance to mirror horizontally
+    for (const p of structure.platforms) {
+        const x = mirror ? (800 - p.x - p.w) : p.x;
+        platforms.push({ x, y: baseY + p.y, w: p.w, h: 16 });
+    }
+}
+
+function pickStructure() {
+    const time = lavaState.framesSinceStart / 60; // seconds elapsed
+    let pool;
+    if (time < 40) {
+        pool = LAVA_STRUCTURES.easy;
+    } else if (time < 90) {
+        // Mix easy and medium
+        pool = Math.random() < 0.4 ? LAVA_STRUCTURES.easy : LAVA_STRUCTURES.medium;
+        pool = [pool[Math.floor(Math.random() * pool.length)]];
+        return pool[0];
+    } else if (time < 150) {
+        // Mix medium and hard
+        pool = Math.random() < 0.3 ? LAVA_STRUCTURES.medium : LAVA_STRUCTURES.hard;
+        pool = [pool[Math.floor(Math.random() * pool.length)]];
+        return pool[0];
+    } else {
+        pool = LAVA_STRUCTURES.hard;
+    }
+    return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function initLavaPlatforms() {
+    platforms = [];
+    // Wide starting platform
+    platforms.push({ x: 50, y: 460, w: 700, h: 16 });
+    // Generate initial rows with simple random platforms
+    let y = 370;
+    let lastY = 370;
+    while (y > -100) {
+        generateLavaPlatformRow(y);
+        lastY = y;
+        y -= 65 + Math.random() * 20;
+    }
+    lavaState.nextPlatformY = lastY;
+    lavaState.useStructures = false; // start with random, switch to structures later
+}
+
+function updateLavaMode() {
+    lavaState.framesSinceStart++;
+
+    // Increase lava speed over time
+    lavaState.lavaSpeed = 0.3 + lavaState.framesSinceStart * 0.0002;
+
+    // Rise lava (decrease Y = move up in world space)
+    lavaState.lavaY -= lavaState.lavaSpeed;
+
+    // Update camera to follow lava (keep lava near screen bottom)
+    lavaState.cameraY = Math.max(0, 480 - lavaState.lavaY);
+
+    // Switch to structures after ~30 seconds
+    if (!lavaState.useStructures && lavaState.framesSinceStart > 1800) {
+        lavaState.useStructures = true;
+    }
+
+    // Generate new platforms/structures above as camera scrolls up
+    const worldTopY = -lavaState.cameraY;
+    while (lavaState.nextPlatformY > worldTopY - 400) {
+        if (lavaState.useStructures) {
+            // Place a pre-built structure
+            const struct = pickStructure();
+            const gap = 70 + Math.random() * 15; // gap between structures
+            lavaState.nextPlatformY -= gap;
+            placeStructure(struct, lavaState.nextPlatformY);
+            lavaState.nextPlatformY -= struct.height;
+        } else {
+            // Random rows (early game)
+            const gap = 65 + Math.random() * 20;
+            lavaState.nextPlatformY -= gap;
+            generateLavaPlatformRow(lavaState.nextPlatformY);
+        }
+    }
+
+    // Remove platforms that are below lava (cleanup)
+    for (let i = platforms.length - 1; i >= 0; i--) {
+        if (platforms[i].y > lavaState.lavaY + 50) {
+            platforms.splice(i, 1);
+        }
+    }
+
+    // Remove powerups and ammo pickups below lava
+    for (let i = powerups.length - 1; i >= 0; i--) {
+        if (powerups[i].y > lavaState.lavaY) powerups.splice(i, 1);
+    }
+    for (let i = ammoPickups.length - 1; i >= 0; i--) {
+        if (ammoPickups[i].y > lavaState.lavaY) ammoPickups.splice(i, 1);
+    }
+
+    // Check if players touch lava
+    checkLavaDeath(player1, 'p1');
+    checkLavaDeath(player2, 'p2');
+}
+
+function checkLavaDeath(player, pKey) {
+    if (player.hp <= 0 || player.y + player.h > lavaState.lavaY) {
+        // Player died
+        const livesKey = pKey === 'p1' ? 'p1Lives' : 'p2Lives';
+        stats[pKey].deaths++;
+        lavaState[livesKey]--;
+
+        if (lavaState[livesKey] <= 0) {
+            // Out of lives - check for game over
+            return; // handled in checkWin
+        }
+
+        // Respawn on the highest visible platform
+        player.hp = HP_OPTIONS[settings.hp];
+        const worldTopY = -lavaState.cameraY;
+        const screenBottom = worldTopY + 500;
+        // Find the highest platform that is on screen and above the lava
+        let bestPlat = null;
+        for (const p of platforms) {
+            if (p.y > lavaState.lavaY - 30) continue; // skip platforms near/below lava
+            if (p.y < worldTopY) continue;              // skip platforms above screen
+            if (p.y > screenBottom) continue;            // skip platforms below screen
+            if (!bestPlat || p.y < bestPlat.y) {
+                bestPlat = p;
+            }
+        }
+        if (bestPlat) {
+            player.x = bestPlat.x + Math.random() * Math.max(0, bestPlat.w - player.w);
+            player.y = bestPlat.y - player.h;
+        } else {
+            // Fallback: spawn at top of screen (should rarely happen)
+            player.y = worldTopY + 30;
+            player.x = 100 + Math.random() * 600;
+        }
+        player.vx = 0;
+        player.vy = 0;
+        player.knockbackVx = 0;
+        player.bullets = [];
+        spawnParticles(player.x + 16, player.y + 20, player.color, 15);
+
+        // Reset AI if player2
+        if (pKey === 'p2' && gameMode === 'pve') {
+            AI.path = [];
+            AI.pathStep = 0;
+            AI.pathTarget = null;
+            AI.stuckTimer = 0;
+            AI.giveUpCooldown = 10;
+        }
+    }
+}
+
+function drawLava() {
+    const lY = lavaState.lavaY;
+    // Lava glow above surface
+    const gradient = ctx.createLinearGradient(0, lY - 50, 0, lY);
+    gradient.addColorStop(0, 'rgba(255, 68, 0, 0)');
+    gradient.addColorStop(1, 'rgba(255, 68, 0, 0.3)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, lY - 50, 800, 50);
+
+    // Wavy lava surface
+    for (let x = 0; x < 800; x += 4) {
+        const wave = Math.sin(x * 0.05 + frameCount * 0.1) * 4;
+        const wave2 = Math.sin(x * 0.08 + frameCount * 0.06) * 2;
+        // Deep red/orange lava body
+        ctx.fillStyle = '#cc2200';
+        ctx.fillRect(x, lY + wave + wave2, 4, 600);
+        // Bright surface
+        ctx.fillStyle = '#ff6600';
+        ctx.fillRect(x, lY + wave + wave2, 4, 6);
+        // Yellow highlight on surface
+        if ((x + Math.floor(frameCount * 2)) % 16 < 8) {
+            ctx.fillStyle = '#ffaa00';
+            ctx.fillRect(x, lY + wave + wave2, 4, 3);
+        }
+    }
+    // Bright yellow crust spots
+    ctx.fillStyle = '#ffdd00';
+    ctx.globalAlpha = 0.5 + Math.sin(frameCount * 0.05) * 0.3;
+    for (let x = 0; x < 800; x += 24) {
+        const wave = Math.sin(x * 0.03 + frameCount * 0.07) * 3;
+        ctx.fillRect(x + 4, lY + wave + 8, 8, 4);
+    }
+    ctx.globalAlpha = 1;
+}
+
+function drawLavaHud() {
+    // Draw lives at top of screen
+    const spacing = 14;
+
+    // P1 lives - top left
+    ctx.fillStyle = player1.color;
+    ctx.font = 'bold 11px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText(player1.name, 10, 16);
+    for (let i = 0; i < lavaState.p1Lives; i++) {
+        const hx = 10 + i * spacing;
+        const hy = 22;
+        // Draw small heart
+        ctx.fillStyle = '#ff4444';
+        ctx.fillRect(hx + 1, hy, 3, 2);
+        ctx.fillRect(hx + 5, hy, 3, 2);
+        ctx.fillRect(hx, hy + 2, 9, 3);
+        ctx.fillRect(hx + 1, hy + 5, 7, 2);
+        ctx.fillRect(hx + 2, hy + 7, 5, 1);
+        ctx.fillRect(hx + 3, hy + 8, 3, 1);
+    }
+
+    // P2 lives - top right
+    ctx.fillStyle = player2.color;
+    ctx.textAlign = 'right';
+    ctx.fillText(player2.name, 790, 16);
+    for (let i = 0; i < lavaState.p2Lives; i++) {
+        const hx = 780 - i * spacing;
+        const hy = 22;
+        ctx.fillStyle = '#ff4444';
+        ctx.fillRect(hx + 1, hy, 3, 2);
+        ctx.fillRect(hx + 5, hy, 3, 2);
+        ctx.fillRect(hx, hy + 2, 9, 3);
+        ctx.fillRect(hx + 1, hy + 5, 7, 2);
+        ctx.fillRect(hx + 2, hy + 7, 5, 1);
+        ctx.fillRect(hx + 3, hy + 8, 3, 1);
+    }
+
+    // Lava speed / height indicator
+    const elapsed = Math.floor(lavaState.framesSinceStart / 60);
+    const mins = Math.floor(elapsed / 60);
+    const secs = elapsed % 60;
+    ctx.fillStyle = '#ff8800';
+    ctx.font = 'bold 12px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(mins + ':' + (secs < 10 ? '0' : '') + secs, 400, 16);
 }
 
 // ============================================
@@ -3983,6 +4716,27 @@ function resetGame() {
             lastSwitch: 0,    // debounce timestamp for tag switching
             roundEndTime: Date.now() + duration * 1000,
         };
+    }
+
+    // Lava Rise mode: init lava state
+    if (settings.gameMode === 4) {
+        const lives = LAVA_LIVES_OPTIONS[settings.lavaLives].lives;
+        lavaState = {
+            lavaY: 500,
+            lavaSpeed: 0.3,
+            cameraY: 0,
+            nextPlatformY: 0,
+            p1Lives: lives,
+            p2Lives: lives,
+            framesSinceStart: 0,
+            useStructures: false,
+        };
+        initLavaPlatforms();
+        // Position players on the wide starting platform
+        player1.x = 250;
+        player1.y = 420;
+        player2.x = 500;
+        player2.y = 420;
     }
 }
 
@@ -4044,12 +4798,17 @@ function gameLoop() {
         updateAmmoPickups();
         if (settings.gameMode === 0 || settings.gameMode === 1) updateSuddenDeath();
         if (settings.gameMode === 2) updateKOTH();
+        if (settings.gameMode === 4) updateLavaMode();
         checkBulletHits();
         checkWin();
         updateParticles();
         updateDamageNumbers();
 
         drawBg();
+        if (settings.gameMode === 4) {
+            ctx.save();
+            ctx.translate(0, lavaState.cameraY);
+        }
         drawPlatforms();
         if (settings.gameMode === 2) drawKOTHHud(); // draw hill zone before players
         drawPowerups();
@@ -4058,6 +4817,11 @@ function gameLoop() {
         player2.draw();
         drawParticles();
         drawDamageNumbers();
+        if (settings.gameMode === 4) {
+            drawLava();
+            ctx.restore();
+            drawLavaHud();
+        }
         if (settings.gameMode === 0 || settings.gameMode === 1) drawRoundTimer();
         if (settings.gameMode === 3) drawTagHud();
     } else if (gameState === 'dying') {
@@ -4066,6 +4830,10 @@ function gameLoop() {
         updateDamageNumbers();
 
         drawBg();
+        if (settings.gameMode === 4) {
+            ctx.save();
+            ctx.translate(0, lavaState.cameraY);
+        }
         drawPlatforms();
         // Draw the winner normally
         if (winner === player1) { player1.draw(); } else { player2.draw(); }
@@ -4073,14 +4841,26 @@ function gameLoop() {
         drawDyingPlayer();
         drawParticles();
         drawDamageNumbers();
+        if (settings.gameMode === 4) {
+            drawLava();
+            ctx.restore();
+            drawLavaHud();
+        }
     } else if (gameState === 'gameover') {
         drawBg();
+        if (settings.gameMode === 4) {
+            ctx.save();
+            ctx.translate(0, lavaState.cameraY);
+        }
         drawPlatforms();
         if (settings.gameMode === 2 || settings.gameMode === 3) {
-            // KOTH and Tag: both players alive, draw both
+            // KOTH, Tag: both players alive, draw both
             player1.draw();
             player2.draw();
             if (settings.gameMode === 2) drawKOTHHud();
+        } else if (settings.gameMode === 4) {
+            // Lava Rise: loser went through death animation, only draw winner
+            if (winner === player1) { player1.draw(); } else { player2.draw(); }
         } else {
             // Classic/One Shot: only draw the winner (loser has exploded)
             if (winner === player1) { player1.draw(); } else { player2.draw(); }
@@ -4089,6 +4869,10 @@ function gameLoop() {
         updateDamageNumbers();
         drawParticles();
         drawDamageNumbers();
+        if (settings.gameMode === 4) {
+            drawLava();
+            ctx.restore();
+        }
         drawGameOverScreen();
     }
 
