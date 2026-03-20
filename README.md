@@ -17,7 +17,7 @@ A local multiplayer 2D pixel shooter game built with HTML5 Canvas and vanilla Ja
   - King of the Hill - Hold the glowing zone to score
   - Tag - Avoid being the tagger!
   - Lava Rise - Climb upward as lava rises, last alive wins!
-- **14 Power-Ups** - Heal, Shield, Rapid Bullets, No Cooldown, 3x Damage, Extra Life, Double Jump, No Knockback, Speed Boost, Super Jump, Swap, Lava Freeze, Platform Spawn, Invert Controls
+- **15 Power-Ups** - Heal, Shield, Rapid Bullets, Half Cooldown, 3x Damage, Extra Life, Double Jump, No Knockback, Speed Boost, Super Jump, Swap, Lava Freeze, Platform Spawn, Invert Controls, Mega Knockback
 - **Special Platforms** - Ice (slippery!), Bounce (trampolines!), Breakable, Moving
 - **Wind Zones** - Horizontal wind pushes you sideways mid-air
 - **Procedural Structures** - Lava Rise generates unique climbing challenges

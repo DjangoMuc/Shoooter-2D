@@ -46,12 +46,12 @@ const POWERUP_TYPES = {
         weight: 1.5,
     },
     nocooldown: {
-        name: 'No Cooldown',
+        name: 'Half Cooldown',
         color: '#cc44ff',
         colorDark: '#7722aa',
         symbol: '!',
         duration: 4000,
-        description: '4s no cooldown',
+        description: '4s half cooldown',
         weight: 1.5,
     },
     damage: {
@@ -146,6 +146,15 @@ const POWERUP_TYPES = {
         duration: 15000,
         description: '15s invert enemy',
         weight: 0.8,
+    },
+    megaknockback: {
+        name: 'Mega Knockback',
+        color: '#ff6633',
+        colorDark: '#aa3311',
+        symbol: 'K',
+        duration: 8000,
+        description: '8s 3x knockback',
+        weight: 1.2,
     },
 };
 const POWERUP_SPAWN_INTERVAL = 4000; // ms between spawns
@@ -287,6 +296,7 @@ let tagState = {
     p1Time: 0,            // ms player1 was "it"
     p2Time: 0,            // ms player2 was "it"
     lastTagSwitch: 0,     // timestamp of last tag switch
+    lastSwitch: 0,        // debounce timestamp for tag switching
     roundEndTime: 0,      // when the round ends
 };
 
@@ -1376,6 +1386,7 @@ class Player {
         this.swapCharges = 0; // stackable swap charges
         this.swapPressed = false; // edge detection for swap activation
         this.invertedUntil = 0; // timestamp when invert wears off
+        this.dropPressed = false; // edge detection for drop-through
         this.dropThrough = false; // falling through platform
         this.dropPlatform = null; // which platform to ignore
         this.ammo = START_AMMO; // ammo count (only used when infiniteAmmo is Off)
@@ -1711,7 +1722,7 @@ class Player {
         } else if (type === 'invert') {
             // Invert the OTHER player's controls for 30 seconds
             const other = this === player1 ? player2 : player1;
-            other.invertedUntil = Date.now() + 30000;
+            other.invertedUntil = Date.now() + POWERUP_TYPES.invert.duration;
             spawnCollectBurst(cx, cy, def.color);
         } else {
             this.activePowerups[type] = Date.now() + def.duration;
@@ -3413,9 +3424,10 @@ function checkBulletHits() {
             // Apply knockback (blocked by noknockback powerup)
             if (!player2.hasPowerup('noknockback')) {
                 const kb1 = KNOCKBACK_OPTIONS[settings.knockback].force;
+                const kbMult1 = player1.hasPowerup('megaknockback') ? 3 : 1;
                 if (kb1 > 0) {
-                    player2.knockbackVx += (b.vx > 0 ? 1 : -1) * kb1;
-                    player2.vy -= kb1 * 0.5;
+                    player2.knockbackVx += (b.vx > 0 ? 1 : -1) * kb1 * kbMult1;
+                    player2.vy -= kb1 * 0.5 * kbMult1;
                 }
             }
             stats.p1.hits++;
@@ -3443,9 +3455,10 @@ function checkBulletHits() {
             // Apply knockback (blocked by noknockback powerup)
             if (!player1.hasPowerup('noknockback')) {
                 const kb2 = KNOCKBACK_OPTIONS[settings.knockback].force;
+                const kbMult2 = player2.hasPowerup('megaknockback') ? 3 : 1;
                 if (kb2 > 0) {
-                    player1.knockbackVx += (b.vx > 0 ? 1 : -1) * kb2;
-                    player1.vy -= kb2 * 0.5;
+                    player1.knockbackVx += (b.vx > 0 ? 1 : -1) * kb2 * kbMult2;
+                    player1.vy -= kb2 * 0.5 * kbMult2;
                 }
             }
             stats.p2.hits++;
@@ -3470,9 +3483,9 @@ function checkWin() {
         const p1Dead = player1.hp <= 0;
         const p2Dead = player2.hp <= 0;
         if (p1Dead && p2Dead) {
-            // Both die simultaneously: whoever has more HP remaining wins (or P2 if truly tied)
+            // Both die simultaneously: random winner (truly fair)
             gameState = 'dying';
-            if (player1.hp > player2.hp) {
+            if (Math.random() < 0.5) {
                 winner = player1; loser = player2; roundWins.p1++;
             } else {
                 winner = player2; loser = player1; roundWins.p2++;
@@ -3515,6 +3528,12 @@ function checkWin() {
             player1.vx = 0;
             player1.vy = 0;
             player1.knockbackVx = 0;
+            player1.bullets = [];
+            player1.activePowerups = {};
+            player1.doubleJumps = 0;
+            player1.platformCharges = 0;
+            player1.swapCharges = 0;
+            player1.invertedUntil = 0;
             spawnParticles(player1.x + 16, player1.y + 20, player1.color, 15);
         }
         if (player2.hp <= 0) {
@@ -3525,6 +3544,12 @@ function checkWin() {
             player2.vx = 0;
             player2.vy = 0;
             player2.knockbackVx = 0;
+            player2.bullets = [];
+            player2.activePowerups = {};
+            player2.doubleJumps = 0;
+            player2.platformCharges = 0;
+            player2.swapCharges = 0;
+            player2.invertedUntil = 0;
             spawnParticles(player2.x + 16, player2.y + 20, player2.color, 15);
             // Reset AI pathfinding so it replans from new position
             if (gameMode === 'pve') {
@@ -3583,6 +3608,13 @@ function checkWin() {
             player1.vx = 0;
             player1.vy = 0;
             player1.knockbackVx = 0;
+            player1.bullets = [];
+            player1.activePowerups = {};
+            player1.doubleJumps = 0;
+            player1.platformCharges = 0;
+            player1.swapCharges = 0;
+            player1.invertedUntil = 0;
+            tagState.lastSwitch = Date.now();
         }
         if (player2.hp <= 0) {
             stats.p2.deaths++;
@@ -3592,6 +3624,13 @@ function checkWin() {
             player2.vx = 0;
             player2.vy = 0;
             player2.knockbackVx = 0;
+            player2.bullets = [];
+            player2.activePowerups = {};
+            player2.doubleJumps = 0;
+            player2.platformCharges = 0;
+            player2.swapCharges = 0;
+            player2.invertedUntil = 0;
+            tagState.lastSwitch = Date.now();
             // Reset AI pathfinding so it replans from new position
             if (gameMode === 'pve') {
                 AI.path = [];
@@ -3846,9 +3885,12 @@ function drawPlatforms() {
         if (p.isGround) {
             drawTiledRect(groundTileCanvas, p.x, p.y, p.w, p.h);
         } else if (p.breakable) {
-            // Breakable platform: reddish/orange with wobble
-            const wobbleX = p.breakTimer > 0 ? (Math.random() - 0.5) * (p.breakTimer > 45 ? 2 : 4) : 0;
-            const wobbleY = p.breakTimer > 0 ? (Math.random() - 0.5) * (p.breakTimer > 45 ? 1 : 2) : 0;
+            // Breakable platform: reddish/orange with accelerating wobble
+            const breakProgress = p.breakTimer > 0 ? 1 - (p.breakTimer / 150) : 0; // 0 = just started, 1 = about to break
+            const wobbleStrength = breakProgress * breakProgress * 6; // quadratic ramp: slow start, strong end
+            const wobbleSpeed = 0.1 + breakProgress * 0.4; // faster oscillation over time
+            const wobbleX = p.breakTimer > 0 ? Math.sin(Date.now() * wobbleSpeed) * wobbleStrength : 0;
+            const wobbleY = p.breakTimer > 0 ? Math.cos(Date.now() * wobbleSpeed * 1.3) * wobbleStrength * 0.4 : 0;
             const dx = p.x + wobbleX;
             const dy = p.y + wobbleY;
             // Draw cracked/reddish platform
@@ -3969,41 +4011,6 @@ for (let x = 0; x < 800; x += 30 + Math.random() * 40) {
     const bw = 20 + Math.random() * 35;
     const bh = 40 + Math.random() * 120;
     buildings.push({ x, w: bw, h: bh });
-}
-
-function drawBackground() {
-    // Sky gradient (pixelated stripes)
-    const colors = ['#0a0a1a', '#0f1128', '#141836', '#16213e', '#1a2744'];
-    const stripeH = canvas.height / colors.length;
-    for (let i = 0; i < colors.length; i++) {
-        ctx.fillStyle = colors[i];
-        ctx.fillRect(0, i * stripeH, canvas.width, stripeH);
-    }
-
-    // Stars
-    for (const s of stars) {
-        const twinkle = Math.sin(frameCount * s.twinkleSpeed + s.twinkleOffset);
-        ctx.globalAlpha = 0.3 + 0.4 * (twinkle * 0.5 + 0.5);
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(Math.floor(s.x), Math.floor(s.y), s.size, s.size);
-    }
-    ctx.globalAlpha = 1;
-
-    // City silhouette
-    for (const b of buildings) {
-        ctx.fillStyle = '#0d1525';
-        ctx.fillRect(b.x, 470 - b.h, b.w, b.h);
-        // Windows
-        ctx.fillStyle = '#1a2744';
-        for (let wy = 470 - b.h + 6; wy < 465; wy += 12) {
-            for (let wx = b.x + 4; wx < b.x + b.w - 4; wx += 8) {
-                if (Math.random() > 0.4) {
-                    ctx.fillStyle = (Math.random() > 0.7) ? '#2a3a5e' : '#1a2744';
-                    ctx.fillRect(wx, wy, 4, 6);
-                }
-            }
-        }
-    }
 }
 
 // Pre-render background
@@ -5570,7 +5577,8 @@ function checkLavaDeath(player, pKey) {
         player.bullets = [];
         player.activePowerups = {};
         player.doubleJumps = 0;
-
+        player.platformCharges = 0;
+        player.swapCharges = 0;
         player.invertedUntil = 0;
         player.jumpPressed = false;
         player.usedDoubleJump = false;
