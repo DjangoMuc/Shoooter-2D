@@ -102,6 +102,8 @@ const settings = {
     tagDuration: 1,  // index into TAG_DURATION_OPTIONS (default 60s)
     knockback: 1,    // index into KNOCKBACK_OPTIONS (default Normal)
     lavaLives: 1,    // index into LAVA_LIVES_OPTIONS (default 3 lives)
+    lavaStartSpeed: 1, // index into LAVA_START_SPEED_OPTIONS (default Normal)
+    lavaAccel: 1,      // index into LAVA_ACCEL_OPTIONS (default Normal)
 };
 const BEST_OF_OPTIONS = [1, 3, 5];
 const MODE_OPTIONS = ['Player vs Player', 'Player vs AI'];
@@ -174,6 +176,20 @@ const LAVA_LIVES_OPTIONS = [
     { name: '3', lives: 3 },
     { name: '5', lives: 5 },
     { name: '10', lives: 10 },
+];
+
+const LAVA_START_SPEED_OPTIONS = [
+    { name: 'Slow', nameDE: 'Langsam', speed: 0.15 },
+    { name: 'Normal', nameDE: 'Normal', speed: 0.3 },
+    { name: 'Fast', nameDE: 'Schnell', speed: 0.5 },
+    { name: 'Very Fast', nameDE: 'Sehr Schnell', speed: 0.8 },
+];
+
+const LAVA_ACCEL_OPTIONS = [
+    { name: 'Slow', nameDE: 'Langsam', accel: 0.0001 },
+    { name: 'Normal', nameDE: 'Normal', accel: 0.0002 },
+    { name: 'Fast', nameDE: 'Schnell', accel: 0.0004 },
+    { name: 'Extreme', nameDE: 'Extrem', accel: 0.0008 },
 ];
 
 // --- Tag Mode State ---
@@ -273,7 +289,7 @@ const TEXTS = {
         timeAsTagger: 'Time as Tagger', lastTagger: 'Last Tagger',
         hillTime: 'Hill Time', hillScore: 'Hill Score',
         deaths: 'Deaths',
-        lavaRise: 'Lava Rise', lblLavaLives: 'LIVES', livesLeft: 'Lives',
+        lavaRise: 'Lava Rise', lblLavaLives: 'LIVES', lblLavaStartSpeed: 'LAVA START SPEED', lblLavaAccel: 'LAVA RISING ACCEL.', livesLeft: 'Lives',
         yes: 'Yes', no: 'No',
         pressRMenu: 'Press R to return to menu',
         pressRNext: 'Press R for next round',
@@ -345,7 +361,7 @@ const TEXTS = {
         timeAsTagger: 'Zeit als F\u00e4nger', lastTagger: 'Letzter F\u00e4nger',
         hillTime: 'Zeit auf H\u00fcgel', hillScore: 'H\u00fcgel-Punkte',
         deaths: 'Tode',
-        lavaRise: 'Steigende Lava', lblLavaLives: 'LEBEN', livesLeft: 'Leben',
+        lavaRise: 'Steigende Lava', lblLavaLives: 'LEBEN', lblLavaStartSpeed: 'LAVA-STARTEMPO', lblLavaAccel: 'LAVA-BESCHL.', livesLeft: 'Leben',
         yes: 'Ja', no: 'Nein',
         pressRMenu: 'R = Zur\u00fcck zum Men\u00fc',
         pressRNext: 'R = N\u00e4chste Runde',
@@ -392,6 +408,12 @@ function getGameplaySettingsItems() {
     if (gm === 4) {
         const llVal = LAVA_LIVES_OPTIONS[settings.lavaLives].name;
         items.push({ key: 'lavaLives', label: T('lblLavaLives'), value: llVal, hasArrows: true });
+        const ssOpt = LAVA_START_SPEED_OPTIONS[settings.lavaStartSpeed];
+        const ssVal = settings.lang === 1 && ssOpt.nameDE ? ssOpt.nameDE : ssOpt.name;
+        items.push({ key: 'lavaStartSpeed', label: T('lblLavaStartSpeed'), value: ssVal, hasArrows: true });
+        const acOpt = LAVA_ACCEL_OPTIONS[settings.lavaAccel];
+        const acVal = settings.lang === 1 && acOpt.nameDE ? acOpt.nameDE : acOpt.name;
+        items.push({ key: 'lavaAccel', label: T('lblLavaAccel'), value: acVal, hasArrows: true });
     }
 
     // Rounds (all modes)
@@ -450,6 +472,8 @@ function handleGameplaySettingChange(key, dir) {
         case 'tagDuration': settings.tagDuration = cycle(settings.tagDuration, TAG_DURATION_OPTIONS.length); break;
         case 'knockback': settings.knockback = cycle(settings.knockback, KNOCKBACK_OPTIONS.length); break;
         case 'lavaLives': settings.lavaLives = cycle(settings.lavaLives, LAVA_LIVES_OPTIONS.length); break;
+        case 'lavaStartSpeed': settings.lavaStartSpeed = cycle(settings.lavaStartSpeed, LAVA_START_SPEED_OPTIONS.length); break;
+        case 'lavaAccel': settings.lavaAccel = cycle(settings.lavaAccel, LAVA_ACCEL_OPTIONS.length); break;
     }
 }
 
@@ -1213,6 +1237,7 @@ class Player {
         this.hp = HP_OPTIONS[settings.hp];
         this.facing = controls.facingDefault;
         this.onGround = false;
+        this.standingOn = null;
         this.lastShot = 0;
         this.bullets = [];
         this.animFrame = 0;
@@ -1313,6 +1338,7 @@ class Player {
 
         this.y += this.vy;
         this.onGround = false;
+        this.standingOn = null; // track which platform we're standing on
 
         for (const p of platforms) {
             // Skip the platform we're dropping through
@@ -1328,6 +1354,7 @@ class Player {
                 this.y = p.y - this.h;
                 this.vy = 0;
                 this.onGround = true;
+                this.standingOn = p;
             }
         }
 
@@ -2375,13 +2402,14 @@ const AI = {
         // --- Screen boundaries (world coords) ---
         const screenTop = -lavaState.cameraY;         // world Y of screen top
         const screenBottom = 500 - lavaState.cameraY;  // world Y of screen bottom
-        const tooHighUp = aiCY < screenTop + 40;       // AI near top edge of screen
+        const tooHighUp = aiCY < screenTop + 60;        // AI very near top edge
+        const inComfortZone = aiCY < screenTop + 150;  // AI in top 30% → comfortable
 
         // --- Lava danger assessment ---
         const lavaDistance = lavaState.lavaY - aiFeetY;
         const criticalZone = lavaDistance < 70;
         const dangerZone = lavaDistance < 140;
-        const safeZone = lavaDistance > 250;
+        const safeZone = lavaDistance > 200;
 
         if (this.giveUpCooldown > 0) this.giveUpCooldown--;
 
@@ -2394,12 +2422,26 @@ const AI = {
             return;
         }
 
+        // --- ON GROUND: flee breakable platform if it's breaking ---
+        if (aiPlayer.standingOn && aiPlayer.standingOn.breakable && aiPlayer.standingOn.breakTimer > 0) {
+            // Platform is breaking! Jump away immediately
+            let climbTarget = this._findBestClimbTarget(aiPlayer, aiFeetY, screenTop);
+            if (climbTarget) {
+                this._navigateToPlat(aiPlayer, climbTarget, true);
+            } else {
+                this.wantsJump = true;
+                if (aiCX < 400) this.wantsRight = true;
+                else this.wantsLeft = true;
+            }
+            return;
+        }
+
         // --- ON GROUND: find climb target and make decisions ---
         let climbTarget = this._findBestClimbTarget(aiPlayer, aiFeetY, screenTop);
 
-        // --- PRIORITY 1: Don't go off-screen at the top ---
-        if (tooHighUp) {
-            // Stay put, don't climb further. Just fight.
+        // --- PRIORITY 1: In comfort zone (top 30%) → don't climb, fight instead ---
+        if (tooHighUp || (inComfortZone && !dangerZone)) {
+            // Stay put in upper-mid area, don't rush to the very top. Just fight.
             this._opportunisticShoot(aiPlayer, humanPlayer, aiCX, aiCY, humanCX, humanCY);
             this._dodgeBullets(aiPlayer, humanPlayer);
             return;
@@ -2490,6 +2532,8 @@ const AI = {
             score += vertDist * 0.5;          // slight preference for higher
             score += p.w * 0.3;              // wider = easier to land on
             if (vertDist < 30) score -= 100; // too close below, not worth it
+            if (p.breakable) score -= 80;    // avoid breakable platforms
+            if (p.breakable && p.breakTimer > 0) score -= 500; // actively breaking = never
 
             if (score > bestScore) {
                 bestScore = score;
@@ -3394,6 +3438,48 @@ function drawPlatforms() {
     for (const p of platforms) {
         if (p.isGround) {
             drawTiledRect(groundTileCanvas, p.x, p.y, p.w, p.h);
+        } else if (p.breakable) {
+            // Breakable platform: reddish/orange with wobble
+            const wobbleX = p.breakTimer > 0 ? (Math.random() - 0.5) * (p.breakTimer > 45 ? 2 : 4) : 0;
+            const wobbleY = p.breakTimer > 0 ? (Math.random() - 0.5) * (p.breakTimer > 45 ? 1 : 2) : 0;
+            const dx = p.x + wobbleX;
+            const dy = p.y + wobbleY;
+            // Draw cracked/reddish platform
+            ctx.fillStyle = p.breakTimer > 0 ? '#8b3a1a' : '#a04520';
+            ctx.fillRect(dx, dy, p.w, p.h);
+            // Crack lines
+            ctx.fillStyle = '#5a2010';
+            for (let cx = dx + 12; cx < dx + p.w - 8; cx += 18 + Math.sin(cx) * 6) {
+                ctx.fillRect(cx, dy + 3, 8, 2);
+                ctx.fillRect(cx + 4, dy + 8, 6, 2);
+            }
+            // Edge highlights (orange tint)
+            ctx.fillStyle = '#d4703a';
+            ctx.fillRect(dx, dy, p.w, 2);
+            ctx.fillStyle = '#5a2010';
+            ctx.fillRect(dx, dy + p.h - 2, p.w, 2);
+        } else if (p.moving) {
+            // Moving platform: blueish/cyan
+            ctx.fillStyle = '#2a5a8a';
+            ctx.fillRect(p.x, p.y, p.w, p.h);
+            // Arrow indicators
+            ctx.fillStyle = '#5aafdf';
+            ctx.fillRect(p.x, p.y, p.w, 2);
+            ctx.fillStyle = '#1a3a5a';
+            ctx.fillRect(p.x, p.y + p.h - 2, p.w, 2);
+            // Direction arrows
+            ctx.fillStyle = '#5aafdf';
+            if (p.moving.axis === 'h') {
+                // Horizontal arrows: ◄ ►
+                const midY = p.y + p.h / 2;
+                ctx.fillRect(p.x + 4, midY - 1, 6, 2);
+                ctx.fillRect(p.x + p.w - 10, midY - 1, 6, 2);
+            } else {
+                // Vertical arrows: ▲ ▼
+                const midX = p.x + p.w / 2;
+                ctx.fillRect(midX - 1, p.y + 4, 2, 6);
+                ctx.fillRect(midX - 1, p.y + p.h - 10, 2, 6);
+            }
         } else {
             drawTiledRect(platTileCanvas, p.x, p.y, p.w, p.h);
             // Edge highlights
@@ -4349,6 +4435,28 @@ const LAVA_STRUCTURES = {
                 { x: 300, y: -360, w: 200 },
             ],
         },
+        { // Crumbling staircase - some steps are breakable
+            height: 350,
+            platforms: [
+                { x: 200, y: 0, w: 400 },
+                { x: 400, y: -70, w: 160 },
+                { x: 250, y: -70, w: 120, breakable: true },  // breakable shortcut
+                { x: 500, y: -150, w: 140 },
+                { x: 300, y: -230, w: 130 },
+                { x: 150, y: -230, w: 120, breakable: true },
+                { x: 250, y: -350, w: 300 },
+            ],
+        },
+        { // Sliding platforms - horizontal movers
+            height: 320,
+            platforms: [
+                { x: 200, y: 0, w: 400 },
+                { x: 350, y: -80, w: 130, moving: { axis: 'h', speed: 0.02, range: 80 } },
+                { x: 200, y: -160, w: 140 },
+                { x: 450, y: -240, w: 120, moving: { axis: 'h', speed: 0.025, range: -70 } },
+                { x: 250, y: -320, w: 300 },
+            ],
+        },
     ],
     // --- HARD structures (horizontal traversal, must run across to find the way up) ---
     hard: [
@@ -4411,20 +4519,112 @@ const LAVA_STRUCTURES = {
                 { x: 200, y: -280, w: 400 },          // exit
             ],
         },
+        { // Two paths: left zigzag climb vs right express elevator
+            height: 550,
+            platforms: [
+                // Base: split left / right
+                { x: 50, y: 0, w: 280 },               // base left
+                { x: 470, y: 0, w: 280 },              // base right
+                // LEFT PATH: zigzag jump & run (left side of screen)
+                { x: 30, y: -75, w: 150 },
+                { x: 220, y: -150, w: 130 },
+                { x: 50, y: -225, w: 140 },
+                { x: 220, y: -300, w: 130 },
+                { x: 50, y: -375, w: 150 },
+                { x: 200, y: -450, w: 140 },
+                // RIGHT PATH: express elevator (travels ~500px up!)
+                { x: 570, y: -250, w: 130, moving: { axis: 'v', speed: 0.012, range: 250 } },
+                { x: 500, y: -500, w: 160 },           // landing at top after elevator
+                // Merge at top
+                { x: 200, y: -550, w: 400 },           // exit
+            ],
+        },
+        { // Crumble bridge: breakable platforms force you to keep moving
+            height: 300,
+            platforms: [
+                { x: 50, y: 0, w: 200 },               // safe start
+                { x: 300, y: 0, w: 150, breakable: true },  // breakable!
+                { x: 520, y: 0, w: 200 },              // safe end
+                { x: 550, y: -80, w: 140 },            // step up right
+                { x: 200, y: -80, w: 200, breakable: true }, // breakable!
+                { x: 30, y: -80, w: 130 },             // safe left
+                { x: 50, y: -170, w: 150 },            // step up
+                { x: 300, y: -230, w: 200, breakable: true }, // breakable!
+                { x: 550, y: -230, w: 150 },           // safe right
+                { x: 250, y: -300, w: 300 },           // exit
+            ],
+        },
+        { // Moving bridge: horizontal platforms swing back and forth
+            height: 320,
+            platforms: [
+                { x: 100, y: 0, w: 600 },              // wide start
+                { x: 200, y: -80, w: 140, moving: { axis: 'h', speed: 0.03, range: 120 } },
+                { x: 500, y: -160, w: 130, moving: { axis: 'h', speed: 0.025, range: -100 } },
+                { x: 200, y: -240, w: 140, moving: { axis: 'h', speed: 0.035, range: 90 } },
+                { x: 250, y: -320, w: 300 },           // exit
+            ],
+        },
+        { // Double elevator: two vertical platforms, one up one down
+            height: 380,
+            platforms: [
+                { x: 100, y: 0, w: 250 },              // start left
+                { x: 450, y: 0, w: 250 },              // start right
+                // Left elevator goes up
+                { x: 150, y: -20, w: 120, moving: { axis: 'v', speed: 0.018, range: -120 } },
+                { x: 50, y: -190, w: 200 },            // mid-left landing
+                // Right elevator goes up (offset phase)
+                { x: 550, y: -100, w: 120, moving: { axis: 'v', speed: 0.02, range: -130 } },
+                { x: 500, y: -280, w: 200 },           // mid-right landing
+                // Breakable shortcut bridge in center
+                { x: 300, y: -190, w: 160, breakable: true },
+                { x: 250, y: -380, w: 300 },           // exit
+            ],
+        },
+        { // Chaos: only moving platforms, single winding path through the madness
+            height: 560,
+            platforms: [
+                // Entry base (stable)
+                { x: 250, y: 0, w: 300 },
+                // Step 1: swing right → must time jump
+                { x: 480, y: -80, w: 110, moving: { axis: 'h', speed: 0.03, range: 100 } },
+                // Step 2: vertical bobber on right side
+                { x: 600, y: -170, w: 110, moving: { axis: 'v', speed: 0.025, range: 35 } },
+                // Step 3: swing left across screen
+                { x: 350, y: -255, w: 120, moving: { axis: 'h', speed: 0.022, range: -120 } },
+                // Step 4: vertical bobber on left side
+                { x: 80, y: -340, w: 110, moving: { axis: 'v', speed: 0.028, range: 30 } },
+                // Step 5: fast swing back right
+                { x: 250, y: -420, w: 100, moving: { axis: 'h', speed: 0.035, range: 130 } },
+                // Step 6: elevator up in center
+                { x: 340, y: -480, w: 120, moving: { axis: 'v', speed: 0.02, range: -40 } },
+                // Exit (stable)
+                { x: 220, y: -560, w: 360 },
+            ],
+        },
     ],
 };
 
 function generateLavaPlatformRow(y) {
     const count = Math.random() < 0.4 ? 3 : 2;
     const baseW = 90 + Math.random() * 70; // 90-160
+    const time = lavaState.framesSinceStart / 60;
+    const mirror = Math.random() < 0.5; // 50% chance to mirror row horizontally
     for (let i = 0; i < count; i++) {
         const sectionW = (800 - 30) / count;
         const w = baseW + Math.random() * 20;
-        const x = 15 + i * sectionW + Math.random() * Math.max(0, sectionW - w);
-        platforms.push({
-            x: Math.max(5, Math.min(x, 795 - w)),
-            y, w, h: 16,
-        });
+        let x = 15 + i * sectionW + Math.random() * Math.max(0, sectionW - w);
+        x = Math.max(5, Math.min(x, 795 - w));
+        if (mirror) x = 800 - x - w; // mirror horizontally
+        const plat = {
+            x, y, w, h: 16,
+        };
+        // Breakable chance increases over time: 35% after 10s, 50% after 60s
+        const breakChance = time > 10 ? Math.min(0.5, 0.35 + (time - 10) * 0.003) : 0;
+        if (Math.random() < breakChance) {
+            plat.breakable = true;
+            plat.breakTimer = 0;
+        }
+        platforms.push(plat);
     }
 }
 
@@ -4433,7 +4633,28 @@ function placeStructure(structure, baseY) {
     const mirror = Math.random() < 0.5; // 50% chance to mirror horizontally
     for (const p of structure.platforms) {
         const x = mirror ? (800 - p.x - p.w) : p.x;
-        platforms.push({ x, y: baseY + p.y, w: p.w, h: 16 });
+        const plat = { x, y: baseY + p.y, w: p.w, h: 16 };
+        // Breakable: defined in structure or random chance (less in endgame)
+        const time = lavaState.framesSinceStart / 60;
+        const breakChance = time > 150 ? 0.18 : 0.3;
+        if (p.breakable || (!p.moving && Math.random() < breakChance)) {
+            plat.breakable = true;
+            plat.breakTimer = 0;
+        }
+        if (p.moving) {
+            const axis = p.moving.axis;
+            // Mirror horizontal movement direction for mirrored structures
+            const originX = mirror ? (800 - p.x - p.w) : p.x;
+            plat.moving = {
+                axis: axis,
+                speed: p.moving.speed,
+                range: p.moving.range,
+                originX: originX,
+                originY: baseY + p.y,
+                phase: Math.random() * Math.PI * 2, // random start phase
+            };
+        }
+        platforms.push(plat);
     }
 }
 
@@ -4441,6 +4662,8 @@ function pickStructure() {
     const time = lavaState.framesSinceStart / 60; // seconds elapsed
     let pool;
     if (time < 40) {
+        // 20% chance for Chaos structure even in early game
+        if (Math.random() < 0.2) return LAVA_STRUCTURES.hard[9];
         pool = LAVA_STRUCTURES.easy;
     } else if (time < 90) {
         // Mix easy and medium
@@ -4448,12 +4671,17 @@ function pickStructure() {
         pool = [pool[Math.floor(Math.random() * pool.length)]];
         return pool[0];
     } else if (time < 150) {
-        // Mix medium and hard
+        // Mix medium and hard; 25% boosted chance for Chaos structure
+        if (Math.random() < 0.25) return LAVA_STRUCTURES.hard[9];
         pool = Math.random() < 0.3 ? LAVA_STRUCTURES.medium : LAVA_STRUCTURES.hard;
         pool = [pool[Math.floor(Math.random() * pool.length)]];
         return pool[0];
     } else {
         pool = LAVA_STRUCTURES.hard;
+    }
+    // 30% boosted chance for "Two paths: zigzag vs elevator" (index 5)
+    if (pool === LAVA_STRUCTURES.hard && Math.random() < 0.3) {
+        return pool[5];
     }
     return pool[Math.floor(Math.random() * pool.length)];
 }
@@ -4478,7 +4706,9 @@ function updateLavaMode() {
     lavaState.framesSinceStart++;
 
     // Increase lava speed over time
-    lavaState.lavaSpeed = 0.3 + lavaState.framesSinceStart * 0.0002;
+    const startSpeed = LAVA_START_SPEED_OPTIONS[settings.lavaStartSpeed].speed;
+    const accelRate = LAVA_ACCEL_OPTIONS[settings.lavaAccel].accel;
+    lavaState.lavaSpeed = startSpeed + lavaState.framesSinceStart * accelRate;
 
     // Rise lava (decrease Y = move up in world space)
     lavaState.lavaY -= lavaState.lavaSpeed;
@@ -4506,6 +4736,65 @@ function updateLavaMode() {
             const gap = 65 + Math.random() * 20;
             lavaState.nextPlatformY -= gap;
             generateLavaPlatformRow(lavaState.nextPlatformY);
+        }
+    }
+
+    // Update moving platforms
+    for (const p of platforms) {
+        if (p.moving) {
+            const m = p.moving;
+            const t = lavaState.framesSinceStart * m.speed + m.phase;
+            if (m.axis === 'h') {
+                p.x = m.originX + Math.sin(t) * m.range;
+            } else {
+                p.y = m.originY + Math.sin(t) * m.range;
+            }
+        }
+    }
+
+    // Update breakable platforms (check if players are standing on them)
+    const players = [player1, player2];
+    for (let i = platforms.length - 1; i >= 0; i--) {
+        const p = platforms[i];
+        if (!p.breakable) continue;
+        // Check if any player is standing on this platform
+        let playerOnIt = false;
+        for (const pl of players) {
+            if (pl.standingOn === p) playerOnIt = true;
+        }
+        if (playerOnIt && p.breakTimer === 0) {
+            p.breakTimer = 150; // 2.5 seconds at 60fps
+        }
+        if (p.breakTimer > 0) {
+            p.breakTimer--;
+            if (p.breakTimer <= 0) {
+                // Platform breaks! Remove it
+                // Unseat any players standing on it
+                for (const pl of players) {
+                    if (pl.standingOn === p) {
+                        pl.standingOn = null;
+                        pl.onGround = false;
+                    }
+                }
+                platforms.splice(i, 1);
+                continue;
+            }
+        }
+    }
+
+    // Move players standing on moving platforms
+    for (const pl of players) {
+        if (pl.standingOn && pl.standingOn.moving) {
+            const m = pl.standingOn.moving;
+            const t = lavaState.framesSinceStart * m.speed + m.phase;
+            const tPrev = (lavaState.framesSinceStart - 1) * m.speed + m.phase;
+            if (m.axis === 'h') {
+                const dx = Math.sin(t) * m.range - Math.sin(tPrev) * m.range;
+                pl.x += dx;
+            } else {
+                const dy = Math.sin(t) * m.range - Math.sin(tPrev) * m.range;
+                pl.y += dy;
+            }
         }
     }
 
@@ -4723,7 +5012,7 @@ function resetGame() {
         const lives = LAVA_LIVES_OPTIONS[settings.lavaLives].lives;
         lavaState = {
             lavaY: 500,
-            lavaSpeed: 0.3,
+            lavaSpeed: LAVA_START_SPEED_OPTIONS[settings.lavaStartSpeed].speed,
             cameraY: 0,
             nextPlatformY: 0,
             p1Lives: lives,
