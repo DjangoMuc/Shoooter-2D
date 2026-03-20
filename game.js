@@ -42,7 +42,7 @@ const POWERUP_TYPES = {
         colorDark: '#aa5500',
         symbol: 'F',
         duration: 6000,
-        description: '6s rapid fire',
+        description: '6s rapid bullets',
         weight: 1.5,
     },
     nocooldown: {
@@ -371,6 +371,15 @@ const TEXTS = {
         mech3: '\u2022 Power-ups spawn randomly. Walk over them to collect!',
         mech4: '\u2022 Limited ammo mode: start with 0 shots, collect ammo pickups',
         mech5: '  (blue "A" boxes) for +5 ammo. Ammo count shown next to HP bar.',
+        mech6: '\u2022 Ice platforms: slippery! You slide and keep momentum.',
+        mech7: '\u2022 Bounce platforms: launch you high into the air.',
+        mech8: '\u2022 Wind zones (Lava Rise): push you sideways mid-air.',
+        modesTitle: 'GAME MODES',
+        mode1: '\u2022 Classic: Reduce enemy HP to 0. Best of X rounds.',
+        mode2: '\u2022 One Shot: 1 HP each, one hit kills! No heal power-ups.',
+        mode3: '\u2022 King of the Hill: Hold the glowing zone to score points.',
+        mode4: '\u2022 Tag: Avoid being the tagger! Lowest time wins.',
+        mode5: '\u2022 Lava Rise: Climb upward as lava rises. Last alive wins!',
         puTitle: 'POWER-UPS',
         closeHint: 'Press H or ESC to close',
         winsMatch: 'wins the match!', winsRound: 'wins the round!',
@@ -443,6 +452,15 @@ const TEXTS = {
         mech3: '\u2022 Power-Ups erscheinen zuf\u00e4llig. Laufe dr\u00fcber zum Einsammeln!',
         mech4: '\u2022 Begrenzte Munition: Starte mit 0 Schuss, sammle Munitions-Pickups',
         mech5: '  (blaue "A" Boxen) f\u00fcr +5 Munition. Anzeige neben der HP-Leiste.',
+        mech6: '\u2022 Eis-Plattformen: rutschig! Man gleitet und beh\u00e4lt Schwung.',
+        mech7: '\u2022 Trampolin-Plattformen: schleudern dich hoch in die Luft.',
+        mech8: '\u2022 Windzonen (Lava Rise): schieben dich seitlich in der Luft.',
+        modesTitle: 'SPIELMODI',
+        mode1: '\u2022 Klassisch: Reduziere gegnerische HP auf 0. Best of X Runden.',
+        mode2: '\u2022 Ein Schuss: 1 HP, ein Treffer t\u00f6tet! Keine Heil-Power-Ups.',
+        mode3: '\u2022 K\u00f6nig d. H\u00fcgels: Halte die leuchtende Zone f\u00fcr Punkte.',
+        mode4: '\u2022 Fangen: Vermeide es, F\u00e4nger zu sein! K\u00fcrzeste Zeit gewinnt.',
+        mode5: '\u2022 Steigende Lava: Klettere nach oben w\u00e4hrend Lava steigt!',
         puTitle: 'POWER-UPS',
         closeHint: 'H oder ESC zum Schlie\u00dfen',
         winsMatch: 'gewinnt das Match!', winsRound: 'gewinnt die Runde!',
@@ -662,6 +680,7 @@ const BG_THEMES = [
     },
 ];
 let showHowToPlay = false;
+let htpScroll = 0;
 let roundWins = { p1: 0, p2: 0 };
 
 // --- Key Rebinding ---
@@ -710,6 +729,14 @@ let stats = {
 // --- Input ---
 const keys = {};
 window.addEventListener('keydown', (e) => {
+    // Block P2 keyboard input when playing against AI
+    if (gameMode === 'pve' && gameState === 'playing' && player2) {
+        const c = player2.controls;
+        if (e.code === c.left || e.code === c.right || e.code === c.jump || e.code === c.down || e.code === c.shoot) {
+            e.preventDefault();
+            return;
+        }
+    }
     keys[e.code] = true;
     if (e.code === 'Space' || e.code === 'Enter' || e.code === 'ArrowUp' || e.code === 'ArrowDown') {
         e.preventDefault();
@@ -740,7 +767,10 @@ window.addEventListener('keydown', (e) => {
         if (showHowToPlay) {
             if (e.code === 'KeyH' || e.code === 'Escape' || e.code === 'Enter' || e.code === 'Space') {
                 showHowToPlay = false;
+                htpScroll = 0;
             }
+            if (e.code === 'ArrowDown' || e.code === 'KeyS') htpScroll += 30;
+            if (e.code === 'ArrowUp' || e.code === 'KeyW') htpScroll = Math.max(0, htpScroll - 30);
         } else if (settingsCategory === -1) {
             // Category selection: System or Gameplay
             if (e.code === 'ArrowUp' || e.code === 'KeyW' || e.code === 'ArrowLeft' || e.code === 'KeyA') {
@@ -1564,6 +1594,22 @@ class Player {
             if (this.y > this.dropPlatform.y + this.dropPlatform.h) {
                 this.dropThrough = false;
                 this.dropPlatform = null;
+                // Allow continuous drop-through while holding down
+                if (keys[downKey]) this.dropPressed = false;
+            }
+        }
+
+        // Frozen lava acts as walkable ground
+        if (settings.gameMode === 4 && lavaState.freezeUntil && Date.now() < lavaState.freezeUntil) {
+            const frozenY = lavaState.lavaY;
+            if (
+                this.y + this.h > frozenY &&
+                this.y + this.h < frozenY + 20 &&
+                this.vy >= 0
+            ) {
+                this.y = frozenY - this.h;
+                this.vy = 0;
+                this.onGround = true;
             }
         }
 
@@ -1731,7 +1777,18 @@ class Player {
             ctx.globalAlpha = 0.6;
         }
 
+        // Inverted controls red blink
+        const isInverted = this.invertedUntil && Date.now() < this.invertedUntil;
+
         drawSprite(frame, this.x, this.y, PX, flipX);
+
+        // Red overlay blink when inverted
+        if (isInverted && Math.floor(frameCount / 8) % 2 === 0) {
+            ctx.globalAlpha = 0.35;
+            ctx.fillStyle = '#ff2244';
+            ctx.fillRect(this.x + 2, this.y + 2, this.w - 4, this.h - 4);
+            ctx.globalAlpha = 1;
+        }
 
         // Draw gun
         const gunSprite = this.sprites.gun;
@@ -4044,18 +4101,18 @@ function drawStartScreen() {
     const p2SkinColor = SKIN_OPTIONS[settings.p2Skin].primary;
 
     ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-    ctx.fillRect(120, 230, 220, 118);
-    ctx.fillRect(460, 230, 220, 118);
+    ctx.fillRect(120, 225, 220, 100);
+    ctx.fillRect(460, 225, 220, 100);
 
     // Pixel borders
     ctx.fillStyle = p1SkinColor;
-    ctx.fillRect(120, 230, 220, 2);
-    ctx.fillRect(120, 346, 220, 2);
+    ctx.fillRect(120, 225, 220, 2);
+    ctx.fillRect(120, 323, 220, 2);
     ctx.fillStyle = p2SkinColor;
-    ctx.fillRect(460, 230, 220, 2);
-    ctx.fillRect(460, 346, 220, 2);
+    ctx.fillRect(460, 225, 220, 2);
+    ctx.fillRect(460, 323, 220, 2);
 
-    ctx.font = 'bold 13px monospace';
+    ctx.font = 'bold 12px monospace';
     ctx.textAlign = 'left';
 
     const b1 = customBindings.p1;
@@ -4063,23 +4120,23 @@ function drawStartScreen() {
     const K = getKeyDisplayName;
 
     ctx.fillStyle = p1SkinColor;
-    ctx.fillText(T('player1'), 135, 250);
+    ctx.fillText(T('player1'), 135, 242);
     ctx.fillStyle = '#aaa';
-    ctx.font = '12px monospace';
-    ctx.fillText(T('move') + '      ' + K(b1.left) + ' / ' + K(b1.right), 135, 272);
-    ctx.fillText(T('jump') + '      ' + K(b1.jump), 135, 292);
-    ctx.fillText(T('drop') + '      ' + K(b1.down), 135, 312);
-    ctx.fillText(T('shoot') + '     ' + K(b1.shoot), 135, 332);
+    ctx.font = '11px monospace';
+    ctx.fillText(T('move') + '      ' + K(b1.left) + ' / ' + K(b1.right), 135, 260);
+    ctx.fillText(T('jump') + '      ' + K(b1.jump), 135, 277);
+    ctx.fillText(T('drop') + '      ' + K(b1.down), 135, 294);
+    ctx.fillText(T('shoot') + '     ' + K(b1.shoot), 135, 311);
 
-    ctx.font = 'bold 13px monospace';
+    ctx.font = 'bold 12px monospace';
     ctx.fillStyle = p2SkinColor;
-    ctx.fillText(T('player2'), 475, 250);
+    ctx.fillText(T('player2'), 475, 242);
     ctx.fillStyle = '#aaa';
-    ctx.font = '12px monospace';
-    ctx.fillText(T('move') + '      ' + K(b2.left) + ' / ' + K(b2.right), 475, 272);
-    ctx.fillText(T('jump') + '      ' + K(b2.jump), 475, 292);
-    ctx.fillText(T('drop') + '      ' + K(b2.down), 475, 312);
-    ctx.fillText(T('shoot') + '     ' + K(b2.shoot), 475, 332);
+    ctx.font = '11px monospace';
+    ctx.fillText(T('move') + '      ' + K(b2.left) + ' / ' + K(b2.right), 475, 260);
+    ctx.fillText(T('jump') + '      ' + K(b2.jump), 475, 277);
+    ctx.fillText(T('drop') + '      ' + K(b2.down), 475, 294);
+    ctx.fillText(T('shoot') + '     ' + K(b2.shoot), 475, 311);
 
     // Power-Up legend (two rows)
     let puTypes = Object.entries(POWERUP_TYPES).filter(([k, v]) => !v.lavaOnly || settings.gameMode === 4);
@@ -4093,8 +4150,8 @@ function drawStartScreen() {
     // Split into rows of max 5
     const rowSize = 5;
     const numRows = Math.ceil(puCount / rowSize);
-    const legendH = 20 + numRows * 28;
-    const legendY = 358;
+    const legendH = 18 + numRows * 26;
+    const legendY = 332;
 
     ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
     ctx.fillRect(100, legendY, 600, legendH);
@@ -4130,7 +4187,7 @@ function drawStartScreen() {
         const rowCount = Math.min(rowSize, puCount - idx);
         const spacing = rowW / rowCount;
         const startX = 120 + spacing / 2;
-        const rowY = legendY + 22 + r * 28;
+        const rowY = legendY + 20 + r * 26;
         for (let i = 0; i < rowCount; i++) {
             const [, pu] = puTypes[idx++];
             drawPuEntry(pu, startX + i * spacing, rowY);
@@ -4483,38 +4540,44 @@ function drawHowToPlay() {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.92)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Title
-    drawPixelText(T('howToPlay'), canvas.width / 2, 45, 28, '#4ecdc4');
+    // Title (fixed, not scrolled)
+    drawPixelText(T('howToPlay'), canvas.width / 2, 35, 28, '#4ecdc4');
 
     // Content box
     const boxX = 80;
     const boxW = 640;
+    const boxTop = 52;
+    const boxBottom = 470;
+    const boxH = boxBottom - boxTop;
     ctx.fillStyle = 'rgba(20, 30, 50, 0.95)';
-    ctx.fillRect(boxX, 60, boxW, 440);
+    ctx.fillRect(boxX, boxTop, boxW, boxH);
     ctx.fillStyle = '#4ecdc4';
-    ctx.fillRect(boxX, 60, boxW, 2);
-    ctx.fillRect(boxX, 498, boxW, 2);
+    ctx.fillRect(boxX, boxTop, boxW, 2);
+    ctx.fillRect(boxX, boxBottom - 2, boxW, 2);
+
+    // Clip to content box for scrolling
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(boxX, boxTop + 2, boxW, boxH - 4);
+    ctx.clip();
 
     ctx.textAlign = 'left';
     const x = 110;
-    let y = 90;
-    const lineH = 19;
+    const lineH = 18;
+    let y = boxTop + 22 - htpScroll;
 
-    // Goal
+    // --- GOAL ---
     ctx.fillStyle = '#ffdd00';
     ctx.font = 'bold 13px monospace';
     ctx.fillText(T('goalTitle'), x, y);
     y += lineH;
     ctx.fillStyle = '#ccc';
     ctx.font = '11px monospace';
-    ctx.fillText(T('goal1'), x, y);
-    y += lineH;
-    ctx.fillText(T('goal2'), x, y);
-    y += lineH;
-    ctx.fillText(T('goal3'), x, y);
-    y += lineH * 1.4;
+    ctx.fillText(T('goal1'), x, y); y += lineH;
+    ctx.fillText(T('goal2'), x, y); y += lineH;
+    ctx.fillText(T('goal3'), x, y); y += lineH * 1.3;
 
-    // Controls
+    // --- CONTROLS ---
     ctx.fillStyle = '#ffdd00';
     ctx.font = 'bold 13px monospace';
     ctx.fillText(T('controlsTitle'), x, y);
@@ -4526,68 +4589,98 @@ function drawHowToPlay() {
     ctx.font = '11px monospace';
     ctx.fillText(T('p1Label'), x, y);
     ctx.fillStyle = '#aaa';
-    ctx.fillText(T('p1Controls'), x + 85, y);
-    y += lineH;
+    ctx.fillText(T('p1Controls'), x + 85, y); y += lineH;
     ctx.fillStyle = '#e94560';
     ctx.fillText(T('p2Label'), x, y);
     ctx.fillStyle = '#aaa';
-    ctx.fillText(T('p2Controls'), x + 85, y);
-    y += lineH;
+    ctx.fillText(T('p2Controls'), x + 85, y); y += lineH;
     ctx.fillStyle = '#888';
-    ctx.fillText(T('escMenu'), x, y);
-    y += lineH * 1.4;
+    ctx.fillText(T('escMenu'), x, y); y += lineH * 1.3;
 
-    // Mechanics
+    // --- MECHANICS ---
     ctx.fillStyle = '#ffdd00';
     ctx.font = 'bold 13px monospace';
-    ctx.fillText(T('mechTitle'), x, y);
-    y += lineH;
+    ctx.fillText(T('mechTitle'), x, y); y += lineH;
     ctx.fillStyle = '#ccc';
     ctx.font = '11px monospace';
-    ctx.fillText(T('mech1'), x, y);
-    y += lineH;
-    ctx.fillText(T('mech2'), x, y);
-    y += lineH;
-    ctx.fillText(T('mech3'), x, y);
-    y += lineH;
-    ctx.fillText(T('mech4'), x, y);
-    y += lineH;
-    ctx.fillText(T('mech5'), x, y);
-    y += lineH * 1.4;
+    ctx.fillText(T('mech1'), x, y); y += lineH;
+    ctx.fillText(T('mech2'), x, y); y += lineH;
+    ctx.fillText(T('mech3'), x, y); y += lineH;
+    ctx.fillText(T('mech4'), x, y); y += lineH;
+    ctx.fillText(T('mech5'), x, y); y += lineH;
+    ctx.fillText(T('mech6'), x, y); y += lineH;
+    ctx.fillText(T('mech7'), x, y); y += lineH;
+    ctx.fillText(T('mech8'), x, y); y += lineH * 1.3;
 
-    // Power-ups
+    // --- GAME MODES ---
     ctx.fillStyle = '#ffdd00';
     ctx.font = 'bold 13px monospace';
-    ctx.fillText(T('puTitle'), x, y);
-    y += lineH + 2;
+    ctx.fillText(T('modesTitle'), x, y); y += lineH;
+    ctx.fillStyle = '#ccc';
+    ctx.font = '11px monospace';
+    ctx.fillText(T('mode1'), x, y); y += lineH;
+    ctx.fillText(T('mode2'), x, y); y += lineH;
+    ctx.fillText(T('mode3'), x, y); y += lineH;
+    ctx.fillText(T('mode4'), x, y); y += lineH;
+    ctx.fillText(T('mode5'), x, y); y += lineH * 1.3;
 
-    const puEntries = Object.values(POWERUP_TYPES);
-    for (const pu of puEntries) {
-        // Mini icon
-        ctx.fillStyle = pu.colorDark;
-        ctx.fillRect(x, y - 8, 12, 12);
-        ctx.fillStyle = pu.color;
-        ctx.fillRect(x, y - 8, 12, 2);
-        ctx.fillRect(x, y + 2, 12, 2);
-        ctx.fillRect(x, y - 8, 2, 12);
-        ctx.fillRect(x + 10, y - 8, 2, 12);
-        ctx.font = 'bold 8px monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText(pu.symbol, x + 6, y + 1);
-        ctx.textAlign = 'left';
+    // --- POWER-UPS ---
+    ctx.fillStyle = '#ffdd00';
+    ctx.font = 'bold 13px monospace';
+    ctx.fillText(T('puTitle'), x, y); y += lineH + 2;
 
-        ctx.fillStyle = pu.color;
-        ctx.font = 'bold 11px monospace';
-        ctx.fillText(pu.name, x + 20, y);
-        ctx.fillStyle = '#aaa';
-        ctx.font = '11px monospace';
-        ctx.fillText('- ' + pu.description, x + 130, y);
+    const puEntries = Object.entries(POWERUP_TYPES);
+    for (const [key, pu] of puEntries) {
+        // Only draw if in visible range (optimization)
+        if (y > boxTop - 20 && y < boxBottom + 20) {
+            ctx.fillStyle = pu.colorDark;
+            ctx.fillRect(x, y - 8, 12, 12);
+            ctx.fillStyle = pu.color;
+            ctx.fillRect(x, y - 8, 12, 2);
+            ctx.fillRect(x, y + 2, 12, 2);
+            ctx.fillRect(x, y - 8, 2, 12);
+            ctx.fillRect(x + 10, y - 8, 2, 12);
+            ctx.font = 'bold 8px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(pu.symbol, x + 6, y + 1);
+            ctx.textAlign = 'left';
+
+            ctx.fillStyle = pu.color;
+            ctx.font = 'bold 11px monospace';
+            ctx.fillText(pu.name, x + 20, y);
+            ctx.fillStyle = '#aaa';
+            ctx.font = '11px monospace';
+            const extra = pu.lavaOnly ? ' [Lava Rise]' : '';
+            ctx.fillText('- ' + pu.description + extra, x + 140, y);
+        }
         y += lineH;
     }
 
-    // Close hint
+    // Total content height for scroll limit
+    const totalContentH = (y + htpScroll) - (boxTop + 22) + 20;
+    const maxScroll = Math.max(0, totalContentH - boxH + 20);
+    if (htpScroll > maxScroll) htpScroll = maxScroll;
+
+    ctx.restore();
+
+    // Scroll indicator arrows
+    if (htpScroll > 0) {
+        ctx.fillStyle = '#4ecdc4';
+        ctx.font = 'bold 14px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('▲', canvas.width / 2, boxTop + 14);
+    }
+    if (htpScroll < maxScroll) {
+        ctx.fillStyle = '#4ecdc4';
+        ctx.font = 'bold 14px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('▼', canvas.width / 2, boxBottom - 6);
+    }
+
+    // Close hint (fixed at bottom)
     const closeBlink = Math.floor(Date.now() / 500) % 2;
-    drawPixelText(T('closeHint'), canvas.width / 2, 520, 14, closeBlink ? '#4ecdc4' : '#2a8a80');
+    const scrollHint = settings.lang === 0 ? 'H/ESC close  |  ↑/↓ scroll' : 'H/ESC schließen  |  ↑/↓ scrollen';
+    drawPixelText(scrollHint, canvas.width / 2, 488, 12, closeBlink ? '#4ecdc4' : '#2a8a80');
 }
 
 function drawGameOverScreen() {
@@ -5209,16 +5302,16 @@ function placeStructure(structure, baseY) {
 function pickStructure() {
     const time = lavaState.framesSinceStart / 60; // seconds elapsed
     let pool;
-    if (time < 40) {
+    if (time < 30) {
         // 20% chance for Chaos structure even in early game
         if (Math.random() < 0.2) return LAVA_STRUCTURES.hard[9];
         pool = LAVA_STRUCTURES.easy;
-    } else if (time < 90) {
+    } else if (time < 55) {
         // Mix easy and medium
         pool = Math.random() < 0.4 ? LAVA_STRUCTURES.easy : LAVA_STRUCTURES.medium;
         pool = [pool[Math.floor(Math.random() * pool.length)]];
         return pool[0];
-    } else if (time < 150) {
+    } else if (time < 85) {
         // Mix medium and hard; 25% boosted chance for Chaos structure
         if (Math.random() < 0.25) return LAVA_STRUCTURES.hard[9];
         pool = Math.random() < 0.3 ? LAVA_STRUCTURES.medium : LAVA_STRUCTURES.hard;
@@ -5437,7 +5530,8 @@ function updateLavaMode() {
 }
 
 function checkLavaDeath(player, pKey) {
-    if (player.hp <= 0 || player.y + player.h > lavaState.lavaY) {
+    const frozen = lavaState.freezeUntil && Date.now() < lavaState.freezeUntil;
+    if (player.hp <= 0 || (!frozen && player.y + player.h > lavaState.lavaY)) {
         // Player died
         const livesKey = pKey === 'p1' ? 'p1Lives' : 'p2Lives';
         stats[pKey].deaths++;
