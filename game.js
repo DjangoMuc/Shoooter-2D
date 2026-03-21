@@ -213,9 +213,9 @@ const PU_FREQ_OPTIONS = [
     { name: 'Chaos', interval: 800 },
 ];
 const AI_DIFF_OPTIONS = [
-    { name: 'Easy', thinkInterval: 12, cooldown: 700, accuracy: 0.5 },
-    { name: 'Medium', thinkInterval: 8, cooldown: 500, accuracy: 0.7 },
-    { name: 'Hard', thinkInterval: 4, cooldown: 350, accuracy: 0.9 },
+    { name: 'Easy', thinkInterval: 10, cooldown: 600, accuracy: 0.45, dodgeChance: 0.3, climbSkill: 0.5, combatIQ: 0.3 },
+    { name: 'Medium', thinkInterval: 6, cooldown: 450, accuracy: 0.7, dodgeChance: 0.6, climbSkill: 0.75, combatIQ: 0.6 },
+    { name: 'Hard', thinkInterval: 3, cooldown: 300, accuracy: 0.92, dodgeChance: 0.9, climbSkill: 1.0, combatIQ: 1.0 },
 ];
 const SOUND_OPTIONS = ['On', 'Off'];
 const GRAVITY_OPTIONS = [
@@ -2213,9 +2213,9 @@ const AI = {
     pathTarget: null, // serialized target to detect changes
     stuckTimer: 0,   // counts frames without path progress
     giveUpCooldown: 0, // after giving up, fight for a while before trying again
-    JUMP_REACH: 110,
-    STUCK_LIMIT: 50,
-    GIVEUP_COOLDOWN: 120, // ~20 seconds of fighting after giving up
+    JUMP_REACH: 130,
+    STUCK_LIMIT: 40,
+    GIVEUP_COOLDOWN: 80, // shorter cooldown, try again sooner
 
     reset() {
         this.thinkTimer = 0;
@@ -2261,18 +2261,25 @@ const AI = {
     _buildPath(startFeetY, targetX, targetY) {
         const path = [];
         let currentY = startFeetY;
-        let safety = 10;
+        let currentX = targetX; // track horizontal position too
+        let safety = 15; // more steps allowed
 
         while (targetY < currentY - this.JUMP_REACH && safety-- > 0) {
             let bestPlat = null;
             let bestScore = Infinity;
             for (const p of platforms) {
                 if (p.isGround) continue;
+                if (p.breakable && p.breakTimer > 0) continue; // skip breaking platforms
                 // Reachable: above current position, within jump range
-                if (p.y < currentY && p.y > currentY - this.JUMP_REACH) {
+                // Use slightly expanded range for diagonal jumps
+                const reach = this.JUMP_REACH + 20;
+                if (p.y < currentY && p.y > currentY - reach) {
                     const platCX = p.x + p.w / 2;
-                    // Prefer: close to targetX, and as high as possible
-                    const score = Math.abs(platCX - targetX) + (currentY - p.y) * -0.3;
+                    // Score: prefer close to us and high
+                    let score = Math.abs(platCX - currentX) * 0.7 + Math.abs(platCX - targetX) * 0.3;
+                    score += (currentY - p.y) * -0.5; // higher = better
+                    if (p.breakable) score += 50; // avoid breakable
+                    if (p.bounce) score -= 20; // bouncy is good
                     if (score < bestScore) {
                         bestScore = score;
                         bestPlat = p;
@@ -2281,6 +2288,7 @@ const AI = {
             }
             if (!bestPlat) break;
             path.push(bestPlat);
+            currentX = bestPlat.x + bestPlat.w / 2;
             currentY = bestPlat.y;
         }
         return path;
@@ -2324,7 +2332,7 @@ const AI = {
         const humanCX = humanPlayer.x + humanPlayer.w / 2;
         const humanCY = humanPlayer.y + humanPlayer.h / 2;
 
-        // --- Decide target: ammo (if needed) > power-up > human ---
+        // --- Decide target: ammo (if needed) > valuable power-up > human ---
         let targetX, targetY;
         let chasingPowerup = false;
 
@@ -2333,29 +2341,48 @@ const AI = {
         let closestAmmoDist = Infinity;
         if (settings.infiniteAmmo === 1 && aiPlayer.ammo <= 2) {
             for (const ap of ammoPickups) {
-                if (ap.y < 200) continue; // ignore ammo on highest platforms
                 const d = Math.hypot(ap.x + ap.w / 2 - aiCX, ap.y + ap.h / 2 - aiCY);
                 if (d < closestAmmoDist) { closestAmmoDist = d; closestAmmo = ap; }
             }
         }
 
-        let closestPU = null;
-        let closestDist = Infinity;
+        // Smart power-up selection: prioritize by value, not just distance
+        let bestPU = null;
+        let bestPUScore = -Infinity;
+        const isOneShot = settings.gameMode === 1;
         for (const pu of powerups) {
-            // Ignore power-ups on the highest platforms (y <= 200)
-            if (pu.y < 200) continue;
             const d = Math.hypot(pu.x + pu.w / 2 - aiCX, pu.y + pu.h / 2 - aiCY);
-            if (d < closestDist) { closestDist = d; closestPU = pu; }
+            if (d > 350) continue; // too far, not worth chasing
+
+            let value = 1;
+            // Value power-ups based on game state
+            if (pu.type === 'heal' && !isOneShot) value = aiPlayer.hp < 60 ? 5 : 1;
+            else if (pu.type === 'invincible') value = isOneShot ? 6 : 3;
+            else if (pu.type === 'damage') value = 3;
+            else if (pu.type === 'megaknockback') value = 2.5;
+            else if (pu.type === 'rapidfire') value = 2;
+            else if (pu.type === 'nocooldown') value = 2;
+            else if (pu.type === 'noknockback') value = 1.5;
+            else if (pu.type === 'speedboost') value = 1.5;
+            else if (pu.type === 'doublejump') value = 1;
+            else if (pu.type === 'superjump') value = 1;
+            else if (pu.type === 'swap') value = 0.8;
+            else if (pu.type === 'invert') value = 2;
+            // Skip lava-only PUs in non-lava modes
+            if (pu.type === 'extralife' || pu.type === 'lavafreeze' || pu.type === 'platspawn') continue;
+
+            const score = value * 100 - d;
+            if (score > bestPUScore) { bestPUScore = score; bestPU = pu; }
         }
 
         // When out of ammo, prioritize ammo pickups over everything
-        if (closestAmmo && (aiPlayer.ammo <= 0 || !closestPU)) {
+        if (closestAmmo && (aiPlayer.ammo <= 0 || !bestPU)) {
             targetX = closestAmmo.x + closestAmmo.w / 2;
             targetY = closestAmmo.y + closestAmmo.h / 2;
             chasingPowerup = true;
-        } else if (closestPU) {
-            targetX = closestPU.x + closestPU.w / 2;
-            targetY = closestPU.y + closestPU.h / 2;
+        } else if (bestPU && bestPUScore > 0) {
+            targetX = bestPU.x + bestPU.w / 2;
+            targetY = bestPU.y + bestPU.h / 2;
             chasingPowerup = true;
         } else {
             targetX = humanCX;
@@ -2520,25 +2547,32 @@ const AI = {
             // AI IS THE TAGGER: chase the human aggressively
             aiPlayer.facing = dx > 0 ? 1 : -1;
 
-            // Shoot to switch tagger via bullet
-            if (Math.abs(dy) < 60 && Math.random() < AI_DIFF_OPTIONS[settings.aiDiff].accuracy) {
+            // Shoot to switch tagger via bullet (very aggressive)
+            if (Math.abs(dy) < 80 && Math.random() < AI_DIFF_OPTIONS[settings.aiDiff].accuracy) {
                 this.wantsShoot = true;
             }
 
-            // Chase: walk toward human
-            if (Math.abs(dx) > 15) {
-                if (dx > 0) this.wantsRight = true;
+            // Predict where human is going and intercept
+            const humanVx = humanPlayer.vx || 0;
+            const predictX = humanCX + humanVx * 15; // predict 15 frames ahead
+            const interceptX = (predictX + humanCX) / 2; // move toward predicted position
+
+            // Chase: walk toward human (or intercept point)
+            const chaseX = dist < 150 ? humanCX : interceptX;
+            const chaseDx = chaseX - aiCX;
+            if (Math.abs(chaseDx) > 10) {
+                if (chaseDx > 0) this.wantsRight = true;
                 else this.wantsLeft = true;
             }
 
-            // If human is above, climb toward them (reuse standard pathfinding)
-            if (humanCY < aiCY - 50) {
+            // If human is above, climb toward them
+            if (humanCY < aiCY - 40) {
                 const targetKey = 'tag_chase_' + Math.round(humanCX / 40) + ',' + Math.round(humanCY / 40);
                 const needsMultiClimb = humanCY < aiFeetY - this.JUMP_REACH;
-                const curPlat = this._getPlatformOf(aiPlayer);
+                const curPlat2 = this._getPlatformOf(aiPlayer);
                 const targetPlat = this._findPlatformAt(humanCX, humanCY);
-                const needsEdgeJump = !needsMultiClimb && curPlat && targetPlat &&
-                    curPlat !== targetPlat && humanCY < aiCY - 30;
+                const needsEdgeJump = !needsMultiClimb && curPlat2 && targetPlat &&
+                    curPlat2 !== targetPlat && humanCY < aiCY - 30;
 
                 if ((needsMultiClimb || needsEdgeJump) && this.giveUpCooldown <= 0) {
                     if (this.pathTarget !== targetKey || (this.path.length === 0 && needsMultiClimb)) {
@@ -2549,13 +2583,13 @@ const AI = {
                     }
                     const oldStep = this.pathStep;
                     if (this.pathStep < this.path.length) {
-                        if (curPlat === this.path[this.pathStep]) { this.pathStep++; this.stuckTimer = 0; }
+                        if (curPlat2 === this.path[this.pathStep]) { this.pathStep++; this.stuckTimer = 0; }
                     }
                     if (oldStep === this.pathStep) this.stuckTimer++;
 
                     if (this.stuckTimer > this.STUCK_LIMIT) {
                         this.path = []; this.pathStep = 0; this.stuckTimer = 0;
-                        this.giveUpCooldown = 60;
+                        this.giveUpCooldown = 40;
                     } else if (needsEdgeJump && this.path.length === 0 && targetPlat) {
                         this._climbTo(aiPlayer, targetPlat, humanCX);
                     } else if (this.pathStep < this.path.length) {
@@ -2568,8 +2602,13 @@ const AI = {
                 }
             }
 
-            // If human is below, drop down
-            if (settings.dropThrough === 0 && humanCY > aiFeetY + 50 && aiPlayer.onGround) {
+            // Jump to close the gap if close and on ground
+            if (dist < 120 && dist > 40 && aiPlayer.onGround && Math.random() < 0.1) {
+                this.wantsJump = true;
+            }
+
+            // If human is below, drop down immediately
+            if (settings.dropThrough === 0 && humanCY > aiFeetY + 30 && aiPlayer.onGround) {
                 for (const p of platforms) {
                     if (p.isGround) continue;
                     if (aiPlayer.x + aiPlayer.w > p.x && aiPlayer.x < p.x + p.w && Math.abs(aiFeetY - p.y) < 3) {
@@ -2582,72 +2621,67 @@ const AI = {
             // AI IS NOT THE TAGGER: flee and evade!
             aiPlayer.facing = dx > 0 ? 1 : -1;
 
-            // Shoot at human to switch tagger onto them
-            if (Math.abs(dy) < 60 && Math.random() < AI_DIFF_OPTIONS[settings.aiDiff].accuracy) {
+            // Shoot at human to switch tagger onto them (very aggressive shooting while fleeing)
+            if (Math.abs(dy) < 80 && Math.random() < AI_DIFF_OPTIONS[settings.aiDiff].accuracy * 1.2) {
                 this.wantsShoot = true;
             }
 
-            // FLEE: run away from human
-            if (dist < 200) {
-                // Close: run in opposite direction
-                if (dx > 0) this.wantsLeft = true;
-                else this.wantsRight = true;
+            // Predict human approach direction
+            const humanVx = humanPlayer.vx || 0;
+            const humanApproaching = (dx > 0 && humanVx < -1) || (dx < 0 && humanVx > 1) || dist < 150;
 
-                // Jump to evade if very close
-                if (dist < 100 && aiPlayer.onGround) {
-                    this.wantsJump = true;
+            // Calculate best flee direction (away from human, away from walls)
+            let fleeDir = dx > 0 ? -1 : 1; // opposite of human
+            // Avoid getting cornered
+            if (aiCX < 80 && fleeDir < 0) fleeDir = 1;
+            if (aiCX > canvas.width - 80 && fleeDir > 0) fleeDir = -1;
+
+            if (dist < 120 || (dist < 200 && humanApproaching)) {
+                // Close or approaching: run + jump evasion
+                if (fleeDir > 0) this.wantsRight = true;
+                else this.wantsLeft = true;
+
+                if (dist < 80 && aiPlayer.onGround) {
+                    this.wantsJump = true; // emergency jump
                 }
-            } else if (dist < 350) {
+            } else if (dist < 300) {
                 // Medium distance: try to get to a different vertical level
-                const curPlat = this._getPlatformOf(aiPlayer);
-                const humanPlat = this._findPlatformAt(humanCX, humanCY + 20);
-                const samePlatform = curPlat && humanPlat && curPlat === humanPlat;
-                const sameLevel = Math.abs(aiCY - humanCY) < 40;
+                const curPlat2 = this._getPlatformOf(aiPlayer);
+                const sameLevel = Math.abs(aiCY - humanCY) < 50;
 
-                if (samePlatform || sameLevel) {
-                    // Same platform/level: jump to a different one
-                    // Find nearest platform that is NOT the human's platform
+                if (sameLevel) {
+                    // Find best escape platform (far from human, reachable)
                     let bestPlat = null;
-                    let bestDist = Infinity;
+                    let bestScore = -Infinity;
                     for (const p of platforms) {
-                        if (p.isGround || p === curPlat) continue;
+                        if (p.isGround || p === curPlat2) continue;
                         const pCX = p.x + p.w / 2;
-                        const pCY = p.y;
-                        const dFromHuman = Math.hypot(pCX - humanCX, pCY - humanCY);
-                        const dFromAI = Math.hypot(pCX - aiCX, pCY - aiCY);
-                        // Prefer platforms far from human but reachable by AI
-                        if (dFromAI < 200 && dFromHuman > 150) {
-                            const score = dFromAI - dFromHuman * 0.5;
-                            if (score < bestDist) { bestDist = score; bestPlat = p; }
-                        }
+                        const dFromHuman = Math.hypot(pCX - humanCX, p.y - humanCY);
+                        const dFromAI = Math.hypot(pCX - aiCX, p.y - aiCY);
+                        if (dFromAI > 250) continue; // too far to reach
+                        const score = dFromHuman * 1.5 - dFromAI;
+                        if (score > bestScore) { bestScore = score; bestPlat = p; }
                     }
 
                     if (bestPlat) {
                         const platCX = bestPlat.x + bestPlat.w / 2;
                         if (bestPlat.y < aiCY) {
-                            // Platform is above: climb to it
                             this._climbTo(aiPlayer, bestPlat, platCX);
                         } else if (settings.dropThrough === 0 && bestPlat.y > aiFeetY) {
-                            // Platform is below: drop through
                             this.wantsDown = true;
                         }
                     } else {
-                        // No good platform found: just run away
-                        if (dx > 0) this.wantsLeft = true;
-                        else this.wantsRight = true;
+                        if (fleeDir > 0) this.wantsRight = true;
+                        else this.wantsLeft = true;
                     }
                 } else {
-                    // Different level: stay and maintain distance
-                    if (Math.random() < 0.05) {
+                    // Different level: maintain position, random movement
+                    if (Math.random() < 0.08) {
                         if (Math.random() < 0.5) this.wantsLeft = true;
                         else this.wantsRight = true;
                     }
                 }
             }
-
-            // Near canvas edges: don't get cornered
-            if (aiCX < 60) this.wantsRight = true;
-            if (aiCX > canvas.width - 60) this.wantsLeft = true;
         }
 
         if (this.giveUpCooldown > 0) this.giveUpCooldown--;
@@ -2671,136 +2705,163 @@ const AI = {
         const hillCX = hillPlat.x + hillPlat.w / 2;
         const hillCY = hillPlat.y;
 
-        // --- Seek ammo pickups when out of ammo ---
-        if (settings.infiniteAmmo === 1 && aiPlayer.ammo <= 0 && ammoPickups.length > 0) {
-            let closestAmmo = null;
-            let closestAmmoDist = Infinity;
-            for (const ap of ammoPickups) {
-                if (ap.y < 200) continue; // ignore ammo on highest platforms
-                const d = Math.hypot(ap.x + ap.w / 2 - aiCX, ap.y + ap.h / 2 - aiCY);
-                if (d < closestAmmoDist) { closestAmmoDist = d; closestAmmo = ap; }
-            }
-            if (closestAmmo) {
-                const ammoX = closestAmmo.x + closestAmmo.w / 2;
-                const ammoY = closestAmmo.y + closestAmmo.h / 2;
-                const needsMultiClimb = ammoY < aiFeetY - this.JUMP_REACH;
-                const curPlat = this._getPlatformOf(aiPlayer);
-                const targetPlat = this._findPlatformAt(ammoX, ammoY);
-                const needsEdgeJump = !needsMultiClimb && curPlat && targetPlat &&
-                    curPlat !== targetPlat && ammoY < aiCY - 30;
-
-                if (needsMultiClimb || needsEdgeJump) {
-                    const targetKey = 'ammo_' + Math.round(ammoX / 40) + ',' + Math.round(ammoY / 40);
-                    if (this.pathTarget !== targetKey || (this.path.length === 0 && needsMultiClimb)) {
-                        this.path = needsMultiClimb ? this._buildPath(aiFeetY, ammoX, ammoY) : [];
-                        this.pathStep = 0;
-                        this.pathTarget = targetKey;
-                        this.stuckTimer = 0;
-                    }
-                    const oldStep = this.pathStep;
-                    if (this.pathStep < this.path.length) {
-                        if (curPlat === this.path[this.pathStep]) { this.pathStep++; this.stuckTimer = 0; }
-                    }
-                    if (oldStep === this.pathStep) this.stuckTimer++;
-                    if (this.stuckTimer > this.STUCK_LIMIT) {
-                        this.path = []; this.pathStep = 0; this.stuckTimer = 0;
-                        this.giveUpCooldown = 30;
-                    } else if (needsEdgeJump && this.path.length === 0 && targetPlat) {
-                        this._climbTo(aiPlayer, targetPlat, ammoX);
-                    } else if (this.pathStep < this.path.length) {
-                        this._climbTo(aiPlayer, this.path[this.pathStep], ammoX);
-                    } else {
-                        this._walkTo(aiPlayer, ammoX, ammoY);
-                    }
-                } else {
-                    this._walkTo(aiPlayer, ammoX, ammoY);
-                }
-                // Still shoot if aligned while going for ammo
-                if (Math.abs(humanCY - aiCY) < 60) {
-                    aiPlayer.facing = humanCX > aiCX ? 1 : -1;
-                }
-                if (this.giveUpCooldown > 0) this.giveUpCooldown--;
-                this._dodgeBullets(aiPlayer, humanPlayer);
-                return; // prioritize ammo over hill
-            }
-        }
-
         // Check if AI is on the hill
         const onHill = kothState.currentHolder === aiPlayer;
+        const accuracy = AI_DIFF_OPTIONS[settings.aiDiff].accuracy;
 
         if (onHill) {
-            // ON THE HILL: stay centered, shoot at enemy
-            const dx = hillCX - aiCX;
-            if (Math.abs(dx) > 20) {
-                if (dx > 0) this.wantsRight = true;
+            // Only collect PUs and ammo when already on the hill
+            for (const pu of powerups) {
+                const d = Math.hypot(pu.x + pu.w/2 - aiCX, pu.y + pu.h/2 - aiCY);
+                if (d < 80) {
+                    const puX = pu.x + pu.w / 2;
+                    if (Math.abs(puX - aiCX) > 10) {
+                        if (puX > aiCX) this.wantsRight = true;
+                        else this.wantsLeft = true;
+                    }
+                    break;
+                }
+            }
+            // ON THE HILL: defensive positioning + aggressive shooting
+            const dxHill = hillCX - aiCX;
+
+            // Stay centered but allow slight repositioning to dodge
+            if (Math.abs(dxHill) > 30) {
+                if (dxHill > 0) this.wantsRight = true;
                 else this.wantsLeft = true;
             }
 
-            // Always face and shoot at enemy
+            // Always face and shoot at enemy (very aggressive)
             aiPlayer.facing = humanCX > aiCX ? 1 : -1;
-            if (Math.random() < AI_DIFF_OPTIONS[settings.aiDiff].accuracy) {
+            if (Math.random() < accuracy * 1.1) {
+                this.wantsShoot = true;
+            }
+
+            // Jump to dodge incoming bullets while staying on hill
+            this._dodgeBullets(aiPlayer, humanPlayer);
+
+            // If enemy is climbing up, shoot them down
+            if (humanCY < aiCY && Math.abs(humanCX - hillCX) < hillPlat.w) {
+                // Enemy approaching from below - shoot aggressively
                 this.wantsShoot = true;
             }
         } else {
-            // NOT ON HILL: pathfind to the hill platform
-            const targetX = hillCX;
-            const targetY = hillCY;
-            const needsMultiClimb = targetY < aiFeetY - this.JUMP_REACH;
-
-            // Decrement give-up cooldown
-            if (this.giveUpCooldown > 0) this.giveUpCooldown--;
-
+            // NOT ON HILL: follow pre-programmed route step by step
             const curPlat = this._getPlatformOf(aiPlayer);
-            const targetPlat = hillPlat;
-            const needsEdgeJump = !needsMultiClimb && curPlat && curPlat !== targetPlat && targetY < aiCY - 30;
 
-            if ((needsMultiClimb || needsEdgeJump) && this.giveUpCooldown <= 0) {
-                const targetKey = 'hill';
-                if (this.pathTarget !== targetKey || (this.path.length === 0 && needsMultiClimb)) {
-                    this.path = needsMultiClimb ? this._buildPath(aiFeetY, targetX, targetY) : [];
-                    this.pathStep = 0;
-                    this.pathTarget = targetKey;
-                    this.stuckTimer = 0;
-                }
-
-                const oldStep = this.pathStep;
-                if (this.pathStep < this.path.length) {
-                    if (curPlat === this.path[this.pathStep]) {
-                        this.pathStep++;
-                        this.stuckTimer = 0;
+            if (!curPlat) {
+                // In the air — steer toward last known target or hill
+                const tgt = this._kothTarget || hillPlat;
+                const tgtCX = tgt.x + tgt.w / 2;
+                if (aiCX < tgtCX - 15) this.wantsRight = true;
+                else if (aiCX > tgtCX + 15) this.wantsLeft = true;
+            } else {
+                // On a platform — find next step and climb to it
+                const nextPlat = this._kothNextStep(curPlat, hillPlat, aiCX, aiFeetY);
+                if (nextPlat && nextPlat !== curPlat) {
+                    this._kothTarget = nextPlat; // remember for air steering
+                    this._climbTo(aiPlayer, nextPlat, nextPlat.x + nextPlat.w / 2);
+                } else {
+                    // No next step found — walk toward hill
+                    this._walkTo(aiPlayer, hillCX, hillCY);
+                    if (aiPlayer.onGround && hillCY < aiCY - 30) {
+                        this.wantsJump = true;
                     }
                 }
-                if (oldStep === this.pathStep) this.stuckTimer++;
-
-                if (this.stuckTimer > this.STUCK_LIMIT) {
-                    this.path = [];
-                    this.pathStep = 0;
-                    this.stuckTimer = 0;
-                    this.giveUpCooldown = 60; // shorter cooldown, keep trying
-                } else if (needsEdgeJump && this.path.length === 0) {
-                    this._climbTo(aiPlayer, targetPlat, targetX);
-                } else if (this.pathStep < this.path.length) {
-                    this._climbTo(aiPlayer, this.path[this.pathStep], targetX);
-                } else {
-                    this._walkTo(aiPlayer, targetX, targetY);
-                }
-            } else {
-                this.path = [];
-                this.pathStep = 0;
-                this._walkTo(aiPlayer, targetX, targetY);
             }
 
-            // Shoot at enemy if roughly aligned while climbing
-            if (Math.abs(humanCY - aiCY) < 60) {
+            // Shoot at enemy while climbing
+            if (Math.abs(humanCY - aiCY) < 70) {
                 aiPlayer.facing = humanCX > aiCX ? 1 : -1;
-                if (Math.random() < AI_DIFF_OPTIONS[settings.aiDiff].accuracy * 0.5) {
+                if (Math.random() < accuracy * 0.7) {
                     this.wantsShoot = true;
                 }
             }
+
+            this._dodgeBullets(aiPlayer, humanPlayer);
+        }
+    },
+
+    // KOTH: Pre-programmed route to the hill.
+    // Summit map layout:
+    //   Ground (y=470)
+    //   Left:  (20,390) → (160,320) → (40,250) → Center(280,280) → Hill(320,180)
+    //   Right: (660,390) → (540,320) → (670,250) → Center(280,280) → Hill(320,180)
+    //   Flanking: (80,160) and (640,160) can reach hill directly
+    _kothNextStep(curPlat, hillPlat, aiCX, aiFeetY) {
+        if (!curPlat) return hillPlat;
+        if (curPlat === hillPlat || curPlat.isHill) return hillPlat;
+
+        const py = curPlat.y;
+        const px = curPlat.x;
+        const pw = curPlat.w;
+        const pcx = px + pw / 2;
+
+        // Find platforms by approximate position
+        const findPlat = (tx, ty, tolerance) => {
+            tolerance = tolerance || 30;
+            return platforms.find(p => Math.abs(p.y - ty) < tolerance && Math.abs(p.x + p.w/2 - tx) < tolerance + p.w/2);
+        };
+
+        // On ground (y~470): go to nearest first step
+        if (curPlat.isGround || py > 440) {
+            // Pick left or right path based on AI position
+            if (aiCX < 400) {
+                return findPlat(80, 390, 40) || findPlat(400, 280, 80); // left step 1
+            } else {
+                return findPlat(720, 390, 40) || findPlat(400, 280, 80); // right step 1
+            }
         }
 
-        // Dodge bullets even in KOTH
-        this._dodgeBullets(aiPlayer, humanPlayer);
+        // Left path step 1 (20,390,w=120) → step 2 (160,320)
+        if (py > 370 && py < 410 && pcx < 400) {
+            return findPlat(210, 320, 40);
+        }
+        // Right path step 1 (660,390,w=120) → step 2 (540,320)
+        if (py > 370 && py < 410 && pcx >= 400) {
+            return findPlat(590, 320, 40);
+        }
+
+        // Left path step 2 (160,320) → step 3 (40,250)
+        if (py > 300 && py < 340 && pcx < 400) {
+            return findPlat(85, 250, 40);
+        }
+        // Right path step 2 (540,320) → step 3 (670,250)
+        if (py > 300 && py < 340 && pcx >= 400) {
+            return findPlat(715, 250, 40);
+        }
+
+        // Left path step 3 (40,250) → center (280,280) or directly to hill
+        if (py > 230 && py < 270 && pcx < 200) {
+            return findPlat(400, 280, 80) || hillPlat;
+        }
+        // Right path step 3 (670,250) → center (280,280) or directly to hill
+        if (py > 230 && py < 270 && pcx > 600) {
+            return findPlat(400, 280, 80) || hillPlat;
+        }
+
+        // Center platform (280,280,w=240) → hill (320,180)
+        if (py > 260 && py < 300 && pcx > 250 && pcx < 550) {
+            return hillPlat;
+        }
+
+        // Flanking platforms (80,160) or (640,160) → hill directly
+        if (py > 140 && py < 180) {
+            return hillPlat;
+        }
+
+        // Fallback: find closest platform that is higher and closer to hill
+        let best = null;
+        let bestScore = Infinity;
+        for (const p of platforms) {
+            if (p === curPlat || p.isGround) continue;
+            if (p.y >= py) continue; // must be higher
+            const dist = Math.abs(p.x + p.w/2 - aiCX) + Math.abs(p.y - py) * 0.5;
+            const hillDist = Math.abs(p.x + p.w/2 - (hillPlat.x + hillPlat.w/2)) + Math.abs(p.y - hillPlat.y);
+            const score = dist + hillDist * 0.3;
+            if (score < bestScore) { bestScore = score; best = p; }
+        }
+        return best || hillPlat;
     },
 
     // Lava Rise AI: climb upward, fight when safe, stay on screen
@@ -2812,45 +2873,33 @@ const AI = {
         const humanCY = humanPlayer.y + humanPlayer.h / 2;
 
         // --- Screen boundaries (world coords) ---
-        const screenTop = -lavaState.cameraY;         // world Y of screen top
-        const screenBottom = 500 - lavaState.cameraY;  // world Y of screen bottom
-        const tooHighUp = aiCY < screenTop + 60;        // AI very near top edge
-        const inComfortZone = aiCY < screenTop + 150;  // AI in top 30% → comfortable
+        const screenTop = -lavaState.cameraY;
+        const screenBottom = 500 - lavaState.cameraY;
 
         // --- Lava danger assessment ---
         const lavaDistance = lavaState.lavaY - aiFeetY;
-        const criticalZone = lavaDistance < 70;
-        const dangerZone = lavaDistance < 140;
-        const safeZone = lavaDistance > 200;
+        const criticalZone = lavaDistance < 80;
+        const dangerZone = lavaDistance < 160;
+        const safeZone = lavaDistance > 220;
+
+        // --- Look-ahead: find the 3 best climb targets (multi-step planning) ---
+        const climbTargets = this._findClimbTargets(aiPlayer, aiFeetY, screenTop, 3);
+        const climbTarget = climbTargets.length > 0 ? climbTargets[0] : null;
 
         if (this.giveUpCooldown > 0) this.giveUpCooldown--;
 
-        // --- While in the air: steer toward current target, use double jump if needed ---
+        // --- Use inventory power-ups intelligently ---
+        this._useLavaInventory(aiPlayer, humanPlayer, lavaDistance, criticalZone);
+
+        // --- While in the air: steer toward current target, smart double jump ---
         if (!aiPlayer.onGround) {
-            // Mid-air: shoot opportunistically
-            this._opportunisticShoot(aiPlayer, humanPlayer, aiCX, aiCY, humanCX, humanCY);
-            // Use double jump if falling and in danger (near lava or falling too long)
-            if (aiPlayer.doubleJumps > 0 && aiPlayer.vy > 1) {
-                const lavaDistAir = lavaState.lavaY - (aiPlayer.y + aiPlayer.h);
-                if (lavaDistAir < 140) {
-                    // Two-frame sequence: release then press to trigger double jump
-                    if (this._djRelease) {
-                        this.wantsJump = true; // re-press
-                        this._djRelease = false;
-                    } else {
-                        this.wantsJump = false; // release first
-                        this._djRelease = true;
-                    }
-                }
-            }
+            this._lavaAirControl(aiPlayer, humanPlayer, aiCX, aiCY, humanCX, humanCY, climbTarget);
             return;
         }
         this._djRelease = false;
 
         // --- ON GROUND: flee breakable platform if it's breaking ---
         if (aiPlayer.standingOn && aiPlayer.standingOn.breakable && aiPlayer.standingOn.breakTimer > 0) {
-            // Platform is breaking! Jump away immediately
-            let climbTarget = this._findBestClimbTarget(aiPlayer, aiFeetY, screenTop);
             if (climbTarget) {
                 this._navigateToPlat(aiPlayer, climbTarget, true);
             } else {
@@ -2861,113 +2910,352 @@ const AI = {
             return;
         }
 
-        // --- ON GROUND: find climb target and make decisions ---
-        let climbTarget = this._findBestClimbTarget(aiPlayer, aiFeetY, screenTop);
+        // --- STUCK DETECTION: If no climbTarget, explore sideways to find a path ---
+        if (!climbTarget && aiPlayer.standingOn) {
+            // Walk to the edge of the current platform to find platforms from a different position
+            const curPlat = aiPlayer.standingOn;
+            if (!this._exploreDir) this._exploreDir = 1;
+            if (!this._exploreTimer) this._exploreTimer = 0;
+            this._exploreTimer++;
 
-        // --- PRIORITY 1: In comfort zone (top 30%) → don't climb, fight instead ---
-        if (tooHighUp || (inComfortZone && !dangerZone)) {
-            // Stay put in upper-mid area, don't rush to the very top. Just fight.
-            this._opportunisticShoot(aiPlayer, humanPlayer, aiCX, aiCY, humanCX, humanCY);
-            this._dodgeBullets(aiPlayer, humanPlayer);
-            return;
+            // Switch direction periodically
+            if (this._exploreTimer > 60) {
+                this._exploreDir *= -1;
+                this._exploreTimer = 0;
+            }
+
+            // Walk to edge in explore direction
+            const targetEdge = this._exploreDir > 0 ? curPlat.x + curPlat.w - 15 : curPlat.x + 15;
+            if (Math.abs(aiCX - targetEdge) > 10) {
+                if (targetEdge > aiCX) this.wantsRight = true;
+                else this.wantsLeft = true;
+            } else {
+                // At edge: try jumping off to reach something
+                if (dangerZone) {
+                    this.wantsJump = true;
+                    if (this._exploreDir > 0) this.wantsRight = true;
+                    else this.wantsLeft = true;
+                }
+            }
+
+            // If in danger and stuck with no target, use emergency resources
+            if (dangerZone && aiPlayer.platformCharges > 0) {
+                this.wantsJump = true;
+                if (aiCX < 400) this.wantsRight = true;
+                else this.wantsLeft = true;
+            }
+        } else {
+            this._exploreTimer = 0;
         }
 
-        // --- PRIORITY 2: Critical lava danger → climb NOW ---
+        // --- ON GROUND: Nearby power-up collection (only useful ones) ---
+        const puTarget = this._findUsefulPowerup(aiPlayer, aiFeetY, screenTop);
+        if (puTarget && !criticalZone) {
+            const puCX = puTarget.x + puTarget.w / 2;
+            const puCY = puTarget.y + puTarget.h / 2;
+            const puDist = Math.hypot(puCX - aiCX, puCY - aiCY);
+            if (puDist < 150 || (safeZone && puDist < 250)) {
+                const puPlat = this._findPlatformAt(puCX, puCY + 20);
+                if (puPlat && puPlat === aiPlayer.standingOn) {
+                    this._walkTo(aiPlayer, puCX, puCY);
+                } else if (puPlat) {
+                    this._navigateToPlat(aiPlayer, puPlat, false);
+                }
+            }
+        }
+
+        // --- PRIORITY 1: Critical lava danger → climb NOW or use emergency ---
         if (criticalZone) {
             if (climbTarget) {
                 this._navigateToPlat(aiPlayer, climbTarget, true);
             } else {
-                // Panic jump
+                // PANIC MODE: jump + platform spawn + double jump
                 this.wantsJump = true;
+                // Jump toward center of screen (more platforms there usually)
                 if (aiCX < 400) this.wantsRight = true;
                 else this.wantsLeft = true;
+                // Spawn platform if we have charges
+                if (aiPlayer.platformCharges > 0) {
+                    this.wantsDown = true;
+                }
             }
             this._dodgeBullets(aiPlayer, humanPlayer);
             return;
         }
 
-        // --- PRIORITY 3: Danger zone → climb urgently, shoot if easy ---
+        // --- PRIORITY 2: Danger zone → climb urgently, shoot if easy ---
         if (dangerZone) {
             if (climbTarget) {
                 this._navigateToPlat(aiPlayer, climbTarget, true);
             }
-            // Quick shot only if perfectly aligned
-            if (Math.abs(humanCY - aiCY) < 40) {
-                aiPlayer.facing = humanCX > aiCX ? 1 : -1;
-                if (Math.random() < AI_DIFF_OPTIONS[settings.aiDiff].accuracy * 0.4) {
-                    this.wantsShoot = true;
-                }
-            }
+            // Aggressive combat while climbing
+            this._lavaShoot(aiPlayer, humanPlayer, aiCX, aiCY, humanCX, humanCY, 0.5);
             this._dodgeBullets(aiPlayer, humanPlayer);
             return;
         }
 
-        // --- PRIORITY 4: Safe → climb + actively fight ---
-        // Always keep climbing as the base action
-        if (climbTarget) {
+        // --- PRIORITY 3: Comfortable → climb steadily + full combat ---
+        if (climbTarget && !safeZone) {
             this._navigateToPlat(aiPlayer, climbTarget, false);
         }
 
-        // Layer on combat: shoot at human when aligned
+        // --- Full combat layer ---
         if (safeZone) {
-            // Very safe: full combat mode alongside climbing
+            // Very safe: aggressive combat, always keep climbing too
+            if (climbTarget) {
+                this._navigateToPlat(aiPlayer, climbTarget, false);
+            }
             const humanDist = Math.hypot(humanCX - aiCX, humanCY - aiCY);
             const humanOnSameLevel = Math.abs(humanCY - aiCY) < 60;
 
-            if (humanOnSameLevel && humanDist < 300) {
-                aiPlayer.facing = (humanCX > aiCX) ? 1 : -1;
-                if (Math.random() < AI_DIFF_OPTIONS[settings.aiDiff].accuracy) {
-                    this.wantsShoot = true;
-                }
+            if (humanOnSameLevel && humanDist < 350) {
+                this._fightHuman(aiPlayer, humanPlayer, aiCX, aiCY, humanCX, humanCY);
             } else {
-                this._opportunisticShoot(aiPlayer, humanPlayer, aiCX, aiCY, humanCX, humanCY);
+                this._lavaShoot(aiPlayer, humanPlayer, aiCX, aiCY, humanCX, humanCY, 1.0);
             }
         } else {
-            this._opportunisticShoot(aiPlayer, humanPlayer, aiCX, aiCY, humanCX, humanCY);
+            this._lavaShoot(aiPlayer, humanPlayer, aiCX, aiCY, humanCX, humanCY, 0.7);
         }
 
         this._dodgeBullets(aiPlayer, humanPlayer);
     },
 
-    // Find the closest reachable platform above AI in lava mode
-    // Only considers platforms within a single jump reach
-    _findBestClimbTarget(aiPlayer, aiFeetY, screenTop) {
-        const aiCX = aiPlayer.x + aiPlayer.w / 2;
-        const jumpReach = this.JUMP_REACH;
-        const candidates = [];
-        for (const p of platforms) {
-            if (p.y >= aiFeetY - 10) continue;           // skip at or below feet
-            if (p.y < aiFeetY - jumpReach) continue;      // skip beyond single jump reach
-            if (p.y > lavaState.lavaY - 30) continue;     // skip near lava
-            if (p.y < screenTop + 20) continue;            // skip above screen top
-            candidates.push(p);
+    // Smart air control for lava mode
+    _lavaAirControl(aiPlayer, humanPlayer, aiCX, aiCY, humanCX, humanCY, climbTarget) {
+        const aiFeetY = aiPlayer.y + aiPlayer.h;
+        const lavaDistAir = lavaState.lavaY - aiFeetY;
+
+        // When falling, find the best landable platform to steer toward
+        if (aiPlayer.vy > 0) {
+            // Look for platforms below and slightly above to land on
+            let bestLand = null;
+            let bestLandScore = -Infinity;
+            for (const p of platforms) {
+                // Platforms we can land on: below us but above lava
+                if (p.y < aiFeetY - 5) continue; // above our feet
+                if (p.y > aiFeetY + 200) continue; // too far below
+                if (p.y > lavaState.lavaY - 20) continue; // in lava
+                const hDist = Math.abs(p.x + p.w/2 - aiCX);
+                if (hDist > 200) continue; // too far sideways
+                let score = -hDist * 1.0 + p.w * 0.5;
+                if (p.y < aiFeetY + 50) score += 50; // prefer close platforms
+                if (p.breakable && p.breakTimer > 0) score -= 500;
+                if (score > bestLandScore) { bestLandScore = score; bestLand = p; }
+            }
+
+            if (bestLand) {
+                const platCX = bestLand.x + bestLand.w / 2;
+                if (aiCX < platCX - 8) this.wantsRight = true;
+                else if (aiCX > platCX + 8) this.wantsLeft = true;
+            } else if (climbTarget) {
+                // No landable platform - steer toward climb target
+                const platCX = climbTarget.x + climbTarget.w / 2;
+                if (aiCX < platCX - 10) this.wantsRight = true;
+                else if (aiCX > platCX + 10) this.wantsLeft = true;
+            }
+        } else if (climbTarget) {
+            // Rising: steer toward climb target
+            const platCX = climbTarget.x + climbTarget.w / 2;
+            if (aiCX < platCX - 10) this.wantsRight = true;
+            else if (aiCX > platCX + 10) this.wantsLeft = true;
         }
-        if (candidates.length === 0) return null;
 
-        // Pick the nearest platform: closest combined vertical + horizontal distance
+        // Shoot while airborne
+        this._opportunisticShoot(aiPlayer, humanPlayer, aiCX, aiCY, humanCX, humanCY);
+
+        // Smart double jump usage
+        if (aiPlayer.doubleJumps > 0 && aiPlayer.vy > 0.5) {
+            const hasPlatBelow = this._hasPlatformBelow(aiPlayer, 70);
+            // Use double jump when: near lava, OR falling fast with nothing below
+            const needsDJ = lavaDistAir < 160 || (aiPlayer.vy > 3 && !hasPlatBelow);
+
+            if (needsDJ) {
+                if (this._djRelease) {
+                    this.wantsJump = true;
+                    this._djRelease = false;
+                } else {
+                    this.wantsJump = false;
+                    this._djRelease = true;
+                }
+            }
+        }
+
+        // Spawn platform mid-air as last resort
+        if (aiPlayer.platformCharges > 0 && aiPlayer.vy > 2) {
+            if (!this._hasPlatformBelow(aiPlayer, 50) && lavaDistAir < 100) {
+                this.wantsDown = true;
+            }
+        }
+    },
+
+    // Check if there's a platform below within reach
+    _hasPlatformBelow(aiPlayer, range) {
+        const aiCX = aiPlayer.x + aiPlayer.w / 2;
+        const aiFeetY = aiPlayer.y + aiPlayer.h;
+        for (const p of platforms) {
+            if (p.y > aiFeetY && p.y < aiFeetY + range &&
+                aiCX > p.x - 10 && aiCX < p.x + p.w + 10) {
+                return true;
+            }
+        }
+        return false;
+    },
+
+    // Use inventory items (swap, platform spawn) intelligently
+    _useLavaInventory(aiPlayer, humanPlayer, lavaDistance, critical) {
+        // Use swap if human is higher and we're in danger
+        if (aiPlayer.swapCharges > 0) {
+            const humanFeetY = humanPlayer.y + humanPlayer.h;
+            const aiFeetY = aiPlayer.y + aiPlayer.h;
+            // Swap if human is significantly higher (>100px) and we're in danger
+            if (humanFeetY < aiFeetY - 100 && lavaDistance < 120) {
+                const swapKey = aiPlayer === player1 ? 'KeyE' : 'ShiftRight';
+                keys[swapKey] = true;
+            }
+        }
+    },
+
+    // Find power-ups that are actually useful in lava mode
+    _findUsefulPowerup(aiPlayer, aiFeetY, screenTop) {
+        const aiCX = aiPlayer.x + aiPlayer.w / 2;
+        const usefulTypes = ['extralife', 'doublejump', 'superjump', 'invincible', 'speedboost',
+                             'platspawn', 'lavafreeze', 'heal', 'megaknockback', 'damage'];
         let best = null;
-        let bestScore = -Infinity;
-        for (const p of candidates) {
-            const vertDist = aiFeetY - p.y; // how far above (positive)
-            const horizDist = Math.abs(p.x + p.w / 2 - aiCX);
+        let bestDist = Infinity;
 
-            // Prefer: close horizontally, reasonable height, wide platforms
-            let score = 0;
-            score -= horizDist * 1.5;         // strongly prefer close horizontal
-            score += vertDist * 0.5;          // slight preference for higher
-            score += p.w * 0.3;              // wider = easier to land on
-            if (vertDist < 30) score -= 100; // too close below, not worth it
-            if (p.breakable) score -= 80;    // avoid breakable platforms
-            if (p.breakable && p.breakTimer > 0) score -= 500; // actively breaking = never
-            if (p.bounce) score += 60;       // bounce pads are great shortcuts
-            if (p.ice) score -= 30;          // ice is risky, slight penalty
+        for (const pu of powerups) {
+            if (!usefulTypes.includes(pu.type)) continue;
+            // Skip if too far below or above screen
+            if (pu.y > lavaState.lavaY - 20) continue;
+            if (pu.y < screenTop) continue;
+            // Skip if too far above us (don't go backwards)
+            if (pu.y < aiFeetY - 150) continue;
 
-            if (score > bestScore) {
-                bestScore = score;
-                best = p;
+            const dist = Math.hypot(pu.x + pu.w/2 - aiCX, pu.y + pu.h/2 - (aiFeetY - aiPlayer.h/2));
+
+            // Prioritize by type
+            let priority = 1;
+            if (pu.type === 'extralife') priority = 0.3; // very valuable
+            if (pu.type === 'doublejump') priority = 0.4;
+            if (pu.type === 'lavafreeze') priority = 0.5;
+            if (pu.type === 'platspawn') priority = 0.5;
+            if (pu.type === 'superjump') priority = 0.6;
+
+            const effectiveDist = dist * priority;
+            if (effectiveDist < bestDist) {
+                bestDist = effectiveDist;
+                best = pu;
             }
         }
         return best;
+    },
+
+    // Lava-mode shooting with configurable aggression
+    _lavaShoot(aiPlayer, humanPlayer, aiCX, aiCY, humanCX, humanCY, aggrMult) {
+        const dy = Math.abs(humanCY - aiCY);
+        const dx = humanCX - aiCX;
+        const accuracy = AI_DIFF_OPTIONS[settings.aiDiff].accuracy * aggrMult;
+
+        if (dy < 50) {
+            aiPlayer.facing = dx > 0 ? 1 : -1;
+            if (Math.random() < accuracy) this.wantsShoot = true;
+        } else if (humanCY > aiCY && dy < 120 && Math.abs(dx) < 80) {
+            aiPlayer.facing = dx > 0 ? 1 : -1;
+            if (Math.random() < accuracy * 0.4) this.wantsShoot = true;
+        }
+    },
+
+    // Find the N best reachable platforms above AI (multi-step lookahead)
+    _findClimbTargets(aiPlayer, aiFeetY, screenTop, count) {
+        const aiCX = aiPlayer.x + aiPlayer.w / 2;
+        let jumpReach = this.JUMP_REACH;
+
+        // WAYPOINT NAVIGATION: If standing on a structure platform, follow the pre-built path
+        if (aiPlayer.standingOn && aiPlayer.standingOn.nextWaypoint) {
+            let wp = aiPlayer.standingOn.nextWaypoint;
+            // Skip breakable platforms that are already breaking
+            while (wp && wp.breakable && wp.breakTimer > 0 && wp.nextWaypoint) {
+                wp = wp.nextWaypoint;
+            }
+            // Only follow if waypoint is above lava and on screen
+            if (wp && wp.y < lavaState.lavaY - 30 && wp.y >= screenTop) {
+                return [wp];
+            }
+        }
+
+        // First pass: standard reach. If nothing found, expand search radius.
+        let candidates = [];
+        for (let attempt = 0; attempt < 2; attempt++) {
+            candidates = [];
+            const reach = attempt === 0 ? jumpReach : jumpReach + 50; // expanded on second try
+            for (const p of platforms) {
+                if (p.y >= aiFeetY - 10) continue;
+                if (p.y < aiFeetY - reach - 30) continue;
+                if (p.y > lavaState.lavaY - 30) continue;
+                if (p.y < screenTop + 10) continue;
+                candidates.push(p);
+            }
+            if (candidates.length > 0) {
+                if (attempt === 1) jumpReach = reach; // use expanded reach for scoring
+                break;
+            }
+        }
+        if (candidates.length === 0) return [];
+
+        // Score each platform with lookahead: does it connect to higher platforms?
+        const scored = [];
+        for (const p of candidates) {
+            if (p.y >= aiFeetY - 10) continue; // strict check for actual targets
+            if (p.y < aiFeetY - jumpReach) continue;
+
+            const vertDist = aiFeetY - p.y;
+            const horizDist = Math.abs(p.x + p.w / 2 - aiCX);
+
+            let score = 0;
+            score -= horizDist * 1.2;
+            score += vertDist * 0.8; // prefer higher platforms more
+            score += p.w * 0.3;
+            if (vertDist < 25) score -= 80;
+            if (p.breakable) score -= 60;
+            if (p.breakable && p.breakTimer > 0) score -= 500;
+            if (p.bounce) score += 80; // bounce pads are amazing shortcuts
+            if (p.ice) score -= 20;
+
+            // LOOKAHEAD: Check if this platform connects to higher platforms
+            let hasUpwardPath = false;
+            for (const p2 of candidates) {
+                if (p2 === p) continue;
+                if (p2.y < p.y && p2.y > p.y - jumpReach) {
+                    const h2Dist = Math.abs(p2.x + p2.w / 2 - (p.x + p.w / 2));
+                    if (h2Dist < 300) { // reachable from this platform
+                        hasUpwardPath = true;
+                        // Extra bonus for platforms that lead to good chains
+                        score += 30;
+                        if (p2.bounce) score += 20;
+                        break;
+                    }
+                }
+            }
+            // Penalty for dead-end platforms (no upward path)
+            if (!hasUpwardPath && vertDist < jumpReach * 0.7) score -= 40;
+
+            // Bonus for platforms with powerups on them
+            for (const pu of powerups) {
+                if (Math.abs(pu.x + pu.w/2 - (p.x + p.w/2)) < p.w/2 + 10 &&
+                    Math.abs(pu.y - p.y) < 30) {
+                    score += 50;
+                }
+            }
+
+            // Difficulty-based noise: Easy AI makes worse choices
+            const climbSkill = AI_DIFF_OPTIONS[settings.aiDiff].climbSkill;
+            score += (1 - climbSkill) * (Math.random() * 200 - 100);
+
+            scored.push({ plat: p, score });
+        }
+
+        scored.sort((a, b) => b.score - a.score);
+        return scored.slice(0, count).map(s => s.plat);
     },
 
     // Navigate to a platform using pathfinding (lava mode helper)
@@ -3004,13 +3292,12 @@ const AI = {
             }
             if (oldStep === this.pathStep) this.stuckTimer++;
 
-            const stuckLimit = urgent ? 25 : this.STUCK_LIMIT; // shorter patience when urgent
+            const stuckLimit = urgent ? 20 : this.STUCK_LIMIT;
             if (this.stuckTimer > stuckLimit) {
                 this.path = [];
                 this.pathStep = 0;
                 this.stuckTimer = 0;
-                this.giveUpCooldown = urgent ? 10 : 30;
-                // If urgent and stuck, try jumping toward any higher platform
+                this.giveUpCooldown = urgent ? 8 : 25;
                 if (urgent && aiPlayer.onGround) {
                     this.wantsJump = true;
                     if (targetX > aiCX) this.wantsRight = true;
@@ -3025,7 +3312,6 @@ const AI = {
             }
         } else if (this.giveUpCooldown <= 0) {
             this._walkTo(aiPlayer, targetX, targetY);
-            // If on ground and target is above, try jumping
             if (aiPlayer.onGround && targetY < aiCY - 30) {
                 if (Math.abs(aiCX - targetX) < 100) {
                     this.wantsJump = true;
@@ -3134,43 +3420,102 @@ const AI = {
         const dx = humanCX - aiCX;
         const dy = humanCY - aiCY;
         const dist = Math.hypot(dx, dy);
+        const diff = AI_DIFF_OPTIONS[settings.aiDiff];
+        const combatIQ = diff.combatIQ;
 
         aiPlayer.facing = dx > 0 ? 1 : -1;
-        if (Math.random() < AI_DIFF_OPTIONS[settings.aiDiff].accuracy) {
+
+        // Shoot with accuracy
+        if (Math.abs(dy) < 70 && Math.random() < diff.accuracy) {
             this.wantsShoot = true;
         }
 
-        if (dist < 80) {
-            if (dx > 0) this.wantsLeft = true;
-            else this.wantsRight = true;
-        } else if (dist > 250) {
-            this._walkTo(aiPlayer, humanCX, humanCY);
+        // Combat IQ affects positioning strategy
+        if (combatIQ > 0.5) {
+            // Medium/Hard: maintain optimal distance
+            const optimalMin = 120;
+            const optimalMax = 200;
+
+            if (dist < 60) {
+                if (dx > 0) this.wantsLeft = true;
+                else this.wantsRight = true;
+                if (aiPlayer.onGround && Math.random() < 0.3) this.wantsJump = true;
+            } else if (dist < optimalMin) {
+                if (dx > 0) this.wantsLeft = true;
+                else this.wantsRight = true;
+            } else if (dist > optimalMax + 50) {
+                this._walkTo(aiPlayer, humanCX, humanCY);
+            } else {
+                // Strafe - more with higher IQ
+                if (Math.random() < 0.1 + combatIQ * 0.1) {
+                    if (Math.random() < 0.5) this.wantsLeft = true;
+                    else this.wantsRight = true;
+                }
+            }
         } else {
-            if (Math.random() < 0.1) {
-                if (Math.random() < 0.5) this.wantsLeft = true;
+            // Easy: simple walk toward human, no distancing
+            if (dist > 150) {
+                if (dx > 0) this.wantsRight = true;
+                else this.wantsLeft = true;
+            } else if (dist < 50) {
+                if (dx > 0) this.wantsLeft = true;
                 else this.wantsRight = true;
             }
         }
 
-        // Rare random jump
-        if (aiPlayer.onGround && Math.random() < 0.008) {
-            this.wantsJump = true;
+        // Jump tactics - scaled by combatIQ
+        if (aiPlayer.onGround) {
+            if (humanCY < aiCY - 60 && Math.abs(dx) < 150 && Math.random() < 0.05 + combatIQ * 0.1) {
+                this.wantsJump = true;
+            } else if (Math.random() < 0.005 + combatIQ * 0.02) {
+                this.wantsJump = true;
+            }
+        }
+
+        // Drop through to chase human below (Medium/Hard only)
+        if (combatIQ > 0.4 && settings.dropThrough === 0 && humanCY > aiCY + 60 && aiPlayer.onGround) {
+            for (const p of platforms) {
+                if (p.isGround) continue;
+                if (aiPlayer.x + aiPlayer.w > p.x && aiPlayer.x < p.x + p.w &&
+                    Math.abs((aiPlayer.y + aiPlayer.h) - p.y) < 3) {
+                    this.wantsDown = true;
+                    break;
+                }
+            }
+        }
+
+        // Smart power-up use (Hard only)
+        if (combatIQ > 0.8 && aiPlayer.swapCharges > 0 && humanPlayer.hp > aiPlayer.hp * 2) {
+            const swapKey = aiPlayer === player1 ? 'KeyE' : 'ShiftRight';
+            keys[swapKey] = true;
         }
     },
 
     _dodgeBullets(aiPlayer, humanPlayer) {
+        const diff = AI_DIFF_OPTIONS[settings.aiDiff];
+        // Difficulty-based dodge chance - Easy AI barely dodges
+        if (Math.random() > diff.dodgeChance) return;
+
+        const aiCX = aiPlayer.x + aiPlayer.w / 2;
+        const aiCY2 = aiPlayer.y + aiPlayer.h / 2;
+
         for (const b of humanPlayer.bullets) {
             const bCY = b.y + b.h / 2;
-            const aiCY = aiPlayer.y + aiPlayer.h / 2;
-            const dist = Math.abs(b.x - (aiPlayer.x + aiPlayer.w / 2));
+            const dist = Math.abs(b.x - aiCX);
 
-            if (dist < 150 && Math.abs(bCY - aiCY) < 30) {
+            if (dist < 180 && Math.abs(bCY - aiCY2) < 35) {
                 const heading = b.vx > 0 ? 1 : -1;
                 const coming =
                     (heading === 1 && b.x < aiPlayer.x) ||
                     (heading === -1 && b.x > aiPlayer.x + aiPlayer.w);
-                if (coming && aiPlayer.onGround) {
-                    this.wantsJump = true;
+                if (coming) {
+                    if (aiPlayer.onGround) {
+                        this.wantsJump = true;
+                    }
+                    if (dist < 100) {
+                        if (Math.random() < 0.5) this.wantsLeft = true;
+                        else this.wantsRight = true;
+                    }
                 }
             }
         }
@@ -5369,11 +5714,15 @@ function generateLavaPlatformRow(y) {
 }
 
 // Place a pre-built structure at a given base Y, optionally mirrored
+let _structIdCounter = 0;
 function placeStructure(structure, baseY) {
     const mirror = Math.random() < 0.5; // 50% chance to mirror horizontally
-    for (const p of structure.platforms) {
+    const structId = ++_structIdCounter;
+    const structPlats = []; // collect all platforms of this structure
+    for (let pi = 0; pi < structure.platforms.length; pi++) {
+        const p = structure.platforms[pi];
         const x = mirror ? (800 - p.x - p.w) : p.x;
-        const plat = { x, y: baseY + p.y, w: p.w, h: 16 };
+        const plat = { x, y: baseY + p.y, w: p.w, h: 16, structId, structOrder: pi };
         // Bounce platforms from structure definition
         if (p.bounce) {
             plat.bounce = true;
@@ -5431,16 +5780,17 @@ function placeStructure(structure, baseY) {
             plat.ice = false;
         }
         platforms.push(plat);
+        structPlats.push(plat);
 
         // Spawn guaranteed good powerups on marked platforms
         if (p.goodPowerup) {
             const goodTypes = ['invincible', 'damage', 'extralife', 'doublejump', 'superjump', 'megaknockback'];
             const count = typeof p.goodPowerup === 'number' ? p.goodPowerup : 1;
-            for (let pi = 0; pi < count; pi++) {
+            for (let gpi = 0; gpi < count; gpi++) {
                 const type = goodTypes[Math.floor(Math.random() * goodTypes.length)];
                 const spacing = plat.w / (count + 1);
                 powerups.push({
-                    x: plat.x + spacing * (pi + 1) - POWERUP_SIZE / 2,
+                    x: plat.x + spacing * (gpi + 1) - POWERUP_SIZE / 2,
                     y: plat.y - POWERUP_SIZE - 4,
                     w: POWERUP_SIZE,
                     h: POWERUP_SIZE,
@@ -5451,6 +5801,12 @@ function placeStructure(structure, baseY) {
                 });
             }
         }
+    }
+    // Build AI waypoint chain: sort structure platforms by Y descending (bottom to top),
+    // then link each platform to the next one above it
+    structPlats.sort((a, b) => b.y - a.y); // bottom first
+    for (let i = 0; i < structPlats.length - 1; i++) {
+        structPlats[i].nextWaypoint = structPlats[i + 1];
     }
     // Spawn structure-defined wind zones
     if (structure.windZones) {
@@ -5501,10 +5857,7 @@ function initLavaPlatforms() {
         y -= 65 + Math.random() * 20;
     }
     lavaState.nextPlatformY = lastY;
-    // TEST: Force structures immediately
-    lavaState.useStructures = true;
-    // ORIGINAL:
-    // lavaState.useStructures = false; // start with random, switch to structures later
+    lavaState.useStructures = false; // start with random, switch to structures later
 }
 
 function updateLavaMode() {
@@ -5525,14 +5878,9 @@ function updateLavaMode() {
     lavaState.cameraY = Math.max(0, 480 - lavaState.lavaY);
 
     // Switch to structures after ~30 seconds
-    // TEST: Force structures immediately
-    if (!lavaState.useStructures) {
+    if (!lavaState.useStructures && lavaState.framesSinceStart > 1800) {
         lavaState.useStructures = true;
     }
-    // ORIGINAL:
-    // if (!lavaState.useStructures && lavaState.framesSinceStart > 1800) {
-    //     lavaState.useStructures = true;
-    // }
 
     // Generate new platforms/structures above as camera scrolls up
     const worldTopY = -lavaState.cameraY;
