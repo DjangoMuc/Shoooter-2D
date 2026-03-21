@@ -1389,6 +1389,7 @@ class Player {
         this.dropPressed = false; // edge detection for drop-through
         this.dropThrough = false; // falling through platform
         this.dropPlatform = null; // which platform to ignore
+        this.slidOffPlatform = null; // ice platform we slid off (ignore collision until clear)
         this.ammo = START_AMMO; // ammo count (only used when infiniteAmmo is Off)
         this.knockbackVx = 0; // horizontal knockback velocity (decays over time)
     }
@@ -1570,13 +1571,32 @@ class Player {
         if (this.x < 0) this.x = 0;
         if (this.x + this.w > canvas.width) this.x = canvas.width - this.w;
 
+        // Detect sliding off an ice platform before vertical collision
+        if (this._prevStandingOn && this._prevStandingOn.ice) {
+            const pp = this._prevStandingOn;
+            const centerX = this.x + this.w / 2;
+            if (centerX <= pp.x || centerX >= pp.x + pp.w) {
+                // Player center slid past the edge - mark platform to ignore
+                this.slidOffPlatform = pp;
+            }
+        }
+
         this.y += this.vy;
         this.onGround = false;
         this.standingOn = null; // track which platform we're standing on
 
+        // Clear slidOff once player is well below the platform
+        if (this.slidOffPlatform) {
+            if (this.y > this.slidOffPlatform.y + this.slidOffPlatform.h + 20) {
+                this.slidOffPlatform = null;
+            }
+        }
+
         for (const p of platforms) {
             // Skip the platform we're dropping through
             if (this.dropThrough && p === this.dropPlatform) continue;
+            // Skip the ice platform we just slid off
+            if (this.slidOffPlatform && p === this.slidOffPlatform) continue;
 
             if (
                 this.x + this.w > p.x &&
@@ -1596,9 +1616,12 @@ class Player {
                     this.vy = 0;
                     this.onGround = true;
                     this.standingOn = p;
+                    this.slidOffPlatform = null; // landed on something else, clear
                 }
             }
         }
+
+        this._prevStandingOn = this.standingOn;
 
         // Reset drop-through once we've fully cleared the platform
         if (this.dropThrough && this.dropPlatform) {
@@ -3240,7 +3263,7 @@ function updatePowerups() {
 
     // Remove old power-ups (despawn after 10s)
     for (let i = powerups.length - 1; i >= 0; i--) {
-        if (now - powerups[i].spawnTime > 10000) {
+        if (!powerups[i].permanent && now - powerups[i].spawnTime > 10000) {
             spawnParticles(powerups[i].x + POWERUP_SIZE / 2, powerups[i].y, '#888', 4);
             powerups.splice(i, 1);
         }
@@ -5216,6 +5239,59 @@ const LAVA_STRUCTURES = {
                 { x: 200, y: -1100, w: 400 },
             ],
         },
+        { // Reward Tower: tall tower + short tower with good powerup on top, must descend to cross
+            height: 700,
+            platforms: [
+                // Base connecting both towers
+                { x: 50, y: 0, w: 700 },
+
+                // === SHORT TOWER (left side, 3 levels, ~250px high) ===
+                { x: 80, y: -80, w: 180 },
+                { x: 60, y: -160, w: 200 },
+                { x: 80, y: -250, w: 180, goodPowerup: 3 },
+
+                // === TALL TOWER (right side, continues to exit) ===
+                { x: 530, y: -80, w: 180 },
+                { x: 510, y: -170, w: 200 },
+                { x: 530, y: -260, w: 180 },
+                { x: 510, y: -350, w: 200 },
+                { x: 530, y: -440, w: 180 },
+                { x: 510, y: -530, w: 200 },
+                { x: 530, y: -620, w: 180 },
+
+                // Exit from tall tower
+                { x: 250, y: -700, w: 350 },
+            ],
+        },
+        { // Wind Corridor: narrow icy climb with strong sidewind pushing you off
+            height: 1100,
+            platforms: [
+                // Base
+                { x: 250, y: 0, w: 300 },
+                // Narrow ice platforms zigzagging up through the wind
+                { x: 280, y: -80, w: 200, ice: true },
+                { x: 320, y: -160, w: 180, ice: true },
+                { x: 260, y: -240, w: 200, ice: true },
+                { x: 310, y: -320, w: 180, ice: true },
+                { x: 270, y: -400, w: 200, ice: true },
+                { x: 320, y: -480, w: 180, ice: true },
+                { x: 260, y: -560, w: 200, ice: true },
+                { x: 300, y: -640, w: 180, ice: true },
+                { x: 280, y: -720, w: 200, ice: true },
+                { x: 310, y: -800, w: 180, ice: true },
+                { x: 270, y: -880, w: 200, ice: true },
+                { x: 300, y: -960, w: 180, ice: true },
+                { x: 550, y: -1040, w: 180, ice: true },
+                // Exit
+                { x: 200, y: -1100, w: 400 },
+            ],
+            // Wind zones: 3 layers alternating direction, strong!
+            windZones: [
+                { x: 100, y: -370, w: 600, h: 370, strength: 1.4 },    // layer 1: wind pushes right
+                { x: 100, y: -730, w: 600, h: 360, strength: -1.4 },   // layer 2: wind pushes left
+                { x: 100, y: -1100, w: 600, h: 370, strength: 1.4 },   // layer 3: wind pushes right again
+            ],
+        },
         { // Ice gauntlet: slippery bridges with gaps
             height: 350,
             platforms: [
@@ -5226,6 +5302,36 @@ const LAVA_STRUCTURES = {
                 { x: 30, y: -150, w: 160 },                   // safe left
                 { x: 300, y: -230, w: 350, ice: true },       // ice bridge
                 { x: 250, y: -350, w: 300 },                  // exit
+            ],
+        },
+        { // Double Carousel: 4 sub-carousels orbiting a master center, each with 4 platforms
+            height: 550,
+            platforms: [
+                // Entry base
+                { x: 200, y: 0, w: 400 },
+                // --- 16 carousel platforms (4 sub-carousels × 4 platforms each) ---
+                // Sub-carousel 0 (starts at top of master orbit)
+                { x: 370, y: -300, w: 80, carousel: { master: 0 , sub: 0 } },
+                { x: 370, y: -300, w: 80, carousel: { master: 0 , sub: 1 } },
+                { x: 370, y: -300, w: 80, carousel: { master: 0 , sub: 2 } },
+                { x: 370, y: -300, w: 80, carousel: { master: 0 , sub: 3 } },
+                // Sub-carousel 1 (starts at right of master orbit)
+                { x: 370, y: -300, w: 80, carousel: { master: 1 , sub: 0 } },
+                { x: 370, y: -300, w: 80, carousel: { master: 1 , sub: 1 } },
+                { x: 370, y: -300, w: 80, carousel: { master: 1 , sub: 2 } },
+                { x: 370, y: -300, w: 80, carousel: { master: 1 , sub: 3 } },
+                // Sub-carousel 2 (starts at bottom of master orbit)
+                { x: 370, y: -300, w: 80, carousel: { master: 2 , sub: 0 } },
+                { x: 370, y: -300, w: 80, carousel: { master: 2 , sub: 1 } },
+                { x: 370, y: -300, w: 80, carousel: { master: 2 , sub: 2 } },
+                { x: 370, y: -300, w: 80, carousel: { master: 2 , sub: 3 } },
+                // Sub-carousel 3 (starts at left of master orbit)
+                { x: 370, y: -300, w: 80, carousel: { master: 3 , sub: 0 } },
+                { x: 370, y: -300, w: 80, carousel: { master: 3 , sub: 1 } },
+                { x: 370, y: -300, w: 80, carousel: { master: 3 , sub: 2 } },
+                { x: 370, y: -300, w: 80, carousel: { master: 3 , sub: 3 } },
+                // Exit platform
+                { x: 200, y: -550, w: 400 },
             ],
         },
     ],
@@ -5275,13 +5381,13 @@ function placeStructure(structure, baseY) {
         // Ice platforms from structure definition or random chance
         if (p.ice) {
             plat.ice = true;
-        } else if (!p.bounce && !p.moving && !p.breakable) {
+        } else if (!p.bounce && !p.moving && !p.breakable && !p.goodPowerup && !p.carousel) {
             const time = lavaState.framesSinceStart / 60;
             const iceChance = time > 20 ? Math.min(0.2, 0.12 + (time - 20) * 0.001) : 0;
             if (Math.random() < iceChance) plat.ice = true;
         }
         // Breakable: defined in structure or random chance (less in endgame)
-        if (!p.bounce && !plat.ice) {
+        if (!p.bounce && !plat.ice && !p.goodPowerup && !p.carousel) {
             const time = lavaState.framesSinceStart / 60;
             const breakChance = time > 150 ? 0.12 : 0.2;
             if (p.breakable || (!p.moving && Math.random() < breakChance)) {
@@ -5302,7 +5408,68 @@ function placeStructure(structure, baseY) {
                 phase: Math.random() * Math.PI * 2, // random start phase
             };
         }
+        if (p.carousel) {
+            // Carousel in carousel: sub-carousels orbit master center, platforms orbit sub-center
+            const masterCenterX = mirror ? (800 - 400) : 400; // center of structure
+            const masterCenterY = baseY + (-300); // vertical center of structure
+            const masterRadius = 190; // radius of outer carousel
+            const subRadius = 55; // radius of each sub-carousel
+            const masterSpeed = 0.008; // rotation speed of outer carousel
+            const subSpeed = 0.02; // rotation speed of inner carousels (faster!)
+            plat.carousel = {
+                masterCenterX,
+                masterCenterY,
+                masterRadius,
+                subRadius,
+                masterSpeed,
+                subSpeed: mirror ? -subSpeed : subSpeed,
+                masterPhase: (p.carousel.master / 4) * Math.PI * 2, // evenly spaced
+                subPhase: (p.carousel.sub / 4) * Math.PI * 2, // evenly spaced
+            };
+            // No breakable/ice for carousel platforms
+            plat.breakable = false;
+            plat.ice = false;
+        }
         platforms.push(plat);
+
+        // Spawn guaranteed good powerups on marked platforms
+        if (p.goodPowerup) {
+            const goodTypes = ['invincible', 'damage', 'extralife', 'doublejump', 'superjump', 'megaknockback'];
+            const count = typeof p.goodPowerup === 'number' ? p.goodPowerup : 1;
+            for (let pi = 0; pi < count; pi++) {
+                const type = goodTypes[Math.floor(Math.random() * goodTypes.length)];
+                const spacing = plat.w / (count + 1);
+                powerups.push({
+                    x: plat.x + spacing * (pi + 1) - POWERUP_SIZE / 2,
+                    y: plat.y - POWERUP_SIZE - 4,
+                    w: POWERUP_SIZE,
+                    h: POWERUP_SIZE,
+                    type,
+                    spawnTime: Date.now(),
+                    bobOffset: Math.random() * Math.PI * 2,
+                    permanent: true,
+                });
+            }
+        }
+    }
+    // Spawn structure-defined wind zones
+    if (structure.windZones) {
+        for (const wz of structure.windZones) {
+            const wzX = mirror ? (800 - wz.x - wz.w) : wz.x;
+            const str = mirror ? -wz.strength : wz.strength;
+            const particles = [];
+            for (let i = 0; i < 16; i++) {
+                particles.push({
+                    x: Math.random() * wz.w,
+                    y: Math.random() * wz.h,
+                    speed: 0.5 + Math.random() * 1.5,
+                });
+            }
+            lavaState.windZones.push({
+                x: wzX, y: baseY + wz.y, w: wz.w, h: wz.h,
+                strength: str, particles,
+            });
+        }
     }
 }
 
@@ -5310,30 +5477,13 @@ function pickStructure() {
     const time = lavaState.framesSinceStart / 60; // seconds elapsed
     let pool;
     if (time < 30) {
-        // 20% chance for Chaos structure even in early game
-        if (Math.random() < 0.2) return LAVA_STRUCTURES.hard[9];
         pool = LAVA_STRUCTURES.easy;
     } else if (time < 55) {
-        // Mix easy and medium
         pool = Math.random() < 0.4 ? LAVA_STRUCTURES.easy : LAVA_STRUCTURES.medium;
-        pool = [pool[Math.floor(Math.random() * pool.length)]];
-        return pool[0];
     } else if (time < 85) {
-        // Mix medium and hard; 25% boosted chance for Chaos structure
-        if (Math.random() < 0.25) return LAVA_STRUCTURES.hard[9];
         pool = Math.random() < 0.3 ? LAVA_STRUCTURES.medium : LAVA_STRUCTURES.hard;
-        pool = [pool[Math.floor(Math.random() * pool.length)]];
-        return pool[0];
     } else {
         pool = LAVA_STRUCTURES.hard;
-    }
-    // 25% boosted chance for "Two paths: zigzag vs elevator" (index 5)
-    if (pool === LAVA_STRUCTURES.hard && Math.random() < 0.25) {
-        return pool[5];
-    }
-    // 20% boosted chance for "Trampoline Tower" (index 10)
-    if (pool === LAVA_STRUCTURES.hard && Math.random() < 0.2) {
-        return pool[10];
     }
     return pool[Math.floor(Math.random() * pool.length)];
 }
@@ -5351,7 +5501,10 @@ function initLavaPlatforms() {
         y -= 65 + Math.random() * 20;
     }
     lavaState.nextPlatformY = lastY;
-    lavaState.useStructures = false; // start with random, switch to structures later
+    // TEST: Force structures immediately
+    lavaState.useStructures = true;
+    // ORIGINAL:
+    // lavaState.useStructures = false; // start with random, switch to structures later
 }
 
 function updateLavaMode() {
@@ -5372,9 +5525,14 @@ function updateLavaMode() {
     lavaState.cameraY = Math.max(0, 480 - lavaState.lavaY);
 
     // Switch to structures after ~30 seconds
-    if (!lavaState.useStructures && lavaState.framesSinceStart > 1800) {
+    // TEST: Force structures immediately
+    if (!lavaState.useStructures) {
         lavaState.useStructures = true;
     }
+    // ORIGINAL:
+    // if (!lavaState.useStructures && lavaState.framesSinceStart > 1800) {
+    //     lavaState.useStructures = true;
+    // }
 
     // Generate new platforms/structures above as camera scrolls up
     const worldTopY = -lavaState.cameraY;
@@ -5468,6 +5626,18 @@ function updateLavaMode() {
                 p.y = m.originY + Math.sin(t) * m.range;
             }
         }
+        if (p.carousel) {
+            const c = p.carousel;
+            const t = lavaState.framesSinceStart;
+            // Master orbit: sub-carousel center position
+            const masterAngle = t * c.masterSpeed + c.masterPhase;
+            const subCenterX = c.masterCenterX + Math.cos(masterAngle) * c.masterRadius;
+            const subCenterY = c.masterCenterY + Math.sin(masterAngle) * c.masterRadius;
+            // Sub orbit: platform position around sub-carousel center
+            const subAngle = t * c.subSpeed + c.subPhase;
+            p.x = subCenterX + Math.cos(subAngle) * c.subRadius - p.w / 2;
+            p.y = subCenterY + Math.sin(subAngle) * c.subRadius;
+        }
     }
 
     // Update breakable platforms (check if players are standing on them)
@@ -5500,7 +5670,7 @@ function updateLavaMode() {
         }
     }
 
-    // Move players standing on moving platforms
+    // Move players standing on moving/carousel platforms
     for (const pl of players) {
         if (pl.standingOn && pl.standingOn.moving) {
             const m = pl.standingOn.moving;
@@ -5513,6 +5683,27 @@ function updateLavaMode() {
                 const dy = Math.sin(t) * m.range - Math.sin(tPrev) * m.range;
                 pl.y += dy;
             }
+        }
+        if (pl.standingOn && pl.standingOn.carousel) {
+            const c = pl.standingOn.carousel;
+            const t = lavaState.framesSinceStart;
+            const tPrev = t - 1;
+            // Current position
+            const masterAngle = t * c.masterSpeed + c.masterPhase;
+            const subCX = c.masterCenterX + Math.cos(masterAngle) * c.masterRadius;
+            const subCY = c.masterCenterY + Math.sin(masterAngle) * c.masterRadius;
+            const subAngle = t * c.subSpeed + c.subPhase;
+            const curX = subCX + Math.cos(subAngle) * c.subRadius;
+            const curY = subCY + Math.sin(subAngle) * c.subRadius;
+            // Previous position
+            const masterAnglePrev = tPrev * c.masterSpeed + c.masterPhase;
+            const subCXp = c.masterCenterX + Math.cos(masterAnglePrev) * c.masterRadius;
+            const subCYp = c.masterCenterY + Math.sin(masterAnglePrev) * c.masterRadius;
+            const subAnglePrev = tPrev * c.subSpeed + c.subPhase;
+            const prevX = subCXp + Math.cos(subAnglePrev) * c.subRadius;
+            const prevY = subCYp + Math.sin(subAnglePrev) * c.subRadius;
+            pl.x += curX - prevX;
+            pl.y += curY - prevY;
         }
     }
 
