@@ -202,6 +202,7 @@ const settings = {
     lavaLives: 1,    // index into LAVA_LIVES_OPTIONS (default 3 lives)
     lavaStartSpeed: 1, // index into LAVA_START_SPEED_OPTIONS (default Normal)
     lavaAccel: 1,      // index into LAVA_ACCEL_OPTIONS (default Normal)
+    keepInventory: 0,  // 0 = lose inventory on death, 1 = keep inventory on death
 };
 const BEST_OF_OPTIONS = [1, 3, 5];
 const MODE_OPTIONS = ['Player vs Player', 'Player vs AI'];
@@ -399,7 +400,7 @@ const TEXTS = {
         timeAsTagger: 'Time as Tagger', lastTagger: 'Last Tagger',
         hillTime: 'Hill Time', hillScore: 'Hill Score',
         deaths: 'Deaths',
-        lavaRise: 'Lava Rise', lblLavaLives: 'LIVES', lblLavaStartSpeed: 'LAVA START SPEED', lblLavaAccel: 'LAVA RISING ACCEL.', livesLeft: 'Lives',
+        lavaRise: 'Lava Rise', lblLavaLives: 'LIVES', lblLavaStartSpeed: 'LAVA START SPEED', lblLavaAccel: 'LAVA RISING ACCEL.', lblKeepInventory: 'KEEP INVENTORY', livesLeft: 'Lives',
         yes: 'Yes', no: 'No',
         pressRMenu: 'Press R to return to menu',
         pressRNext: 'Press R for next round',
@@ -480,7 +481,7 @@ const TEXTS = {
         timeAsTagger: 'Zeit als F\u00e4nger', lastTagger: 'Letzter F\u00e4nger',
         hillTime: 'Zeit auf H\u00fcgel', hillScore: 'H\u00fcgel-Punkte',
         deaths: 'Tode',
-        lavaRise: 'Steigende Lava', lblLavaLives: 'LEBEN', lblLavaStartSpeed: 'LAVA-STARTEMPO', lblLavaAccel: 'LAVA-BESCHL.', livesLeft: 'Leben',
+        lavaRise: 'Steigende Lava', lblLavaLives: 'LEBEN', lblLavaStartSpeed: 'LAVA-STARTEMPO', lblLavaAccel: 'LAVA-BESCHL.', lblKeepInventory: 'INVENTAR BEHALTEN', livesLeft: 'Leben',
         yes: 'Ja', no: 'Nein',
         pressRMenu: 'R = Zur\u00fcck zum Men\u00fc',
         pressRNext: 'R = N\u00e4chste Runde',
@@ -533,6 +534,8 @@ function getGameplaySettingsItems() {
         const acOpt = LAVA_ACCEL_OPTIONS[settings.lavaAccel];
         const acVal = settings.lang === 1 && acOpt.nameDE ? acOpt.nameDE : acOpt.name;
         items.push({ key: 'lavaAccel', label: T('lblLavaAccel'), value: acVal, hasArrows: true });
+        const kiVal = settings.keepInventory === 0 ? T('no') : T('yes');
+        items.push({ key: 'keepInventory', label: T('lblKeepInventory'), value: kiVal, hasArrows: true });
     }
 
     // Rounds (all modes)
@@ -593,6 +596,7 @@ function handleGameplaySettingChange(key, dir) {
         case 'lavaLives': settings.lavaLives = cycle(settings.lavaLives, LAVA_LIVES_OPTIONS.length); break;
         case 'lavaStartSpeed': settings.lavaStartSpeed = cycle(settings.lavaStartSpeed, LAVA_START_SPEED_OPTIONS.length); break;
         case 'lavaAccel': settings.lavaAccel = cycle(settings.lavaAccel, LAVA_ACCEL_OPTIONS.length); break;
+        case 'keepInventory': settings.keepInventory = cycle(settings.keepInventory, 2); break;
     }
 }
 
@@ -1483,6 +1487,7 @@ class Player {
                 ) {
                     this.dropThrough = true;
                     this.dropPlatform = p;
+                    this.platSpawnPressed = true; // prevent platform spawn while dropping through
                     this.vy = 2;
                     this.onGround = false;
                     break;
@@ -1495,8 +1500,12 @@ class Player {
         }
 
         // Platform spawn: press down while in air (Lava Rise, with charges)
-        // Must be truly airborne (not dropping through a platform)
-        if (settings.gameMode === 4 && this.platformCharges > 0 && !this.onGround && !this.dropThrough && keys[downKey] && !this.platSpawnPressed) {
+        // Only on fresh press (not held), must be truly airborne, and not near a platform below
+        const nearPlatBelow = !this.onGround && platforms.some(p =>
+            this.x + this.w > p.x && this.x < p.x + p.w &&
+            this.y + this.h <= p.y && this.y + this.h + 40 >= p.y
+        );
+        if (settings.gameMode === 4 && this.platformCharges > 0 && !this.onGround && !this.dropThrough && keys[downKey] && !this.platSpawnPressed && !nearPlatBelow) {
             this.platSpawnPressed = true;
             this.dropPressed = true; // prevent immediate drop-through on landing
             this.platformCharges--;
@@ -6116,8 +6125,10 @@ function checkLavaDeath(player, pKey) {
         player.bullets = [];
         player.activePowerups = {};
         player.doubleJumps = 0;
-        player.platformCharges = 0;
-        player.swapCharges = 0;
+        if (!settings.keepInventory) {
+            player.platformCharges = 0;
+            player.swapCharges = 0;
+        }
         player.invertedUntil = 0;
         player.jumpPressed = false;
         player.usedDoubleJump = false;
