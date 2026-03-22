@@ -161,7 +161,9 @@ const POWERUP_SPAWN_INTERVAL = 4000; // ms between spawns
 const POWERUP_SIZE = 18;
 
 // --- Game State ---
-let gameState = 'start'; // 'start', 'settings', 'playing', 'dying', 'roundover', 'gameover'
+let gameState = 'start'; // 'start', 'startmenu', 'settings', 'playing', 'dying', 'roundover', 'gameover'
+let startMenuCursor = 0; // cursor for start menu
+let startMenuAdvanced = false; // true = showing advanced settings sub-screen
 let gameMode = null; // 'pvp' or 'pve'
 let winner = null;
 let loser = null;
@@ -184,6 +186,7 @@ const settings = {
     bestOf: 0,    // 0 = Bo1, 1 = Bo3, 2 = Bo5
     bg: 0,        // index into BG_THEMES
     sound: 0,     // 0 = On, 1 = Off
+    volume: 10,   // 0-10 (0%, 10%, 20%, ..., 100%)
     lang: 0,      // 0 = English, 1 = Deutsch
     hp: 1,        // index into HP_OPTIONS (default 100)
     puFreq: 1,    // index into PU_FREQ_OPTIONS (default Normal)
@@ -203,6 +206,8 @@ const settings = {
     lavaStartSpeed: 1, // index into LAVA_START_SPEED_OPTIONS (default Normal)
     lavaAccel: 1,      // index into LAVA_ACCEL_OPTIONS (default Normal)
     keepInventory: 0,  // 0 = lose inventory on death, 1 = keep inventory on death
+    p1Name: 'Player 1',
+    p2Name: 'Player 2',
 };
 const BEST_OF_OPTIONS = [1, 3, 5];
 const MODE_OPTIONS = ['Player vs Player', 'Player vs AI'];
@@ -328,8 +333,14 @@ let lavaState = {
 const TEXTS = {
     en: {
         subtitle: 'Local 2D Pixel Shooter',
-        pressEnter: 'Press ENTER to start',
+        pressEnter: 'PLAY',
         pressSpace: 'Press SPACE for settings',
+        startMenu: 'GAME SETUP',
+        advancedSettings: 'ADVANCED',
+        startGame: 'START GAME',
+        startMenuHint: '\u2191\u2193 navigate  |  \u2190\u2192 change  |  ENTER start',
+        advancedHint: '\u2191\u2193 navigate  |  \u2190\u2192 change  |  ESC back',
+        pressLeftAdvanced: '\u2190 Advanced settings',
         player1: 'PLAYER 1', player2: 'PLAYER 2',
         move: 'Move:', jump: 'Jump:', drop: 'Drop:', shoot: 'Shoot:',
         settings: 'SETTINGS', system: 'SYSTEM', gameplay: 'GAMEPLAY',
@@ -350,7 +361,7 @@ const TEXTS = {
         notIt: 'Not It', leastTime: 'Least Time', light: 'Light', extreme: 'Extreme',
         classic: 'Classic', oneShot: 'One Shot', koth: 'King of the Hill', tag: 'Tag',
         tagTagger: 'TAGGER', tagTime: 'Time as Tagger',
-        kothHold: 'HOLD THE HILL!', kothScore: 'Hill Score',
+        kothHold: 'STAY ON THE HILL!', kothScore: 'Hill Score',
         tagEnded: 'TIME UP!',
         bestOf: 'Best of ',
         slow: 'Slow', fast: 'Fast', veryFast: 'Very Fast',
@@ -409,8 +420,14 @@ const TEXTS = {
     },
     de: {
         subtitle: 'Lokaler 2D Pixel Shooter',
-        pressEnter: 'ENTER zum Starten',
+        pressEnter: 'SPIELEN',
         pressSpace: 'LEERTASTE f\u00fcr Einstellungen',
+        startMenu: 'SPIELSTART',
+        advancedSettings: 'ERWEITERT',
+        startGame: 'SPIEL STARTEN',
+        startMenuHint: '\u2191\u2193 navigieren  |  \u2190\u2192 \u00e4ndern  |  ENTER starten',
+        advancedHint: '\u2191\u2193 navigieren  |  \u2190\u2192 \u00e4ndern  |  ESC zur\u00fcck',
+        pressLeftAdvanced: '\u2190 Erweiterte Einstellungen',
         player1: 'SPIELER 1', player2: 'SPIELER 2',
         move: 'Bewegen:', jump: 'Springen:', drop: 'Fallen:', shoot: 'Schie\u00dfen:',
         settings: 'EINSTELLUNGEN', system: 'SYSTEM', gameplay: 'GAMEPLAY',
@@ -431,7 +448,7 @@ const TEXTS = {
         notIt: 'Nicht F\u00e4nger', leastTime: 'K\u00fcrzeste Zeit', light: 'Leicht', extreme: 'Extrem',
         classic: 'Klassisch', oneShot: 'Ein Schuss', koth: 'K\u00f6nig d. H\u00fcgels', tag: 'Fangen',
         tagTagger: 'F\u00c4NGER', tagTime: 'Zeit als F\u00e4nger',
-        kothHold: 'HALTE DEN H\u00dcGEL!', kothScore: 'H\u00fcgel-Punkte',
+        kothHold: 'BLEIB AUF DEM H\u00dcGEL!', kothScore: 'H\u00fcgel-Punkte',
         tagEnded: 'ZEIT UM!',
         bestOf: 'Best of ',
         slow: 'Langsam', fast: 'Schnell', veryFast: 'Sehr schnell',
@@ -494,6 +511,62 @@ function T(key) {
     const lang = settings.lang === 0 ? 'en' : 'de';
     return TEXTS[lang][key] || TEXTS.en[key] || key;
 }
+
+// Tooltip descriptions for all settings
+const TOOLTIPS = {
+    en: {
+        gameMode: 'Choose the game mode',
+        mode: 'Play against a friend or the AI',
+        bestOf: 'Number of rounds to determine the winner',
+        map: 'Select the arena layout',
+        hp: 'Starting health points for each player',
+        puFreq: 'How often power-ups spawn on the map',
+        aiDiff: 'How smart the computer opponent plays',
+        gravity: 'Affects jump height and fall speed',
+        suddenDeath: 'After the timer, platforms start breaking!',
+        dropThrough: 'Press down to fall through platforms',
+        infiniteAmmo: 'Unlimited bullets without pickups',
+        ammoFreq: 'How often ammo pickups appear',
+        tagWinRule: 'Who wins: not the tagger, or least time as tagger',
+        tagDuration: 'How long a tag round lasts',
+        knockback: 'How far bullets push players back',
+        lavaLives: 'How many lives each player has',
+        lavaStartSpeed: 'How fast the lava rises at the start',
+        lavaAccel: 'How much the lava speeds up over time',
+        keepInventory: 'Keep power-ups after dying',
+        bg: 'Change the background theme',
+        lang: 'Switch between English and German',
+        p1Skin: 'Change Player 1 character color',
+        p2Skin: 'Change Player 2 character color',
+        controls: 'Customize keyboard bindings for both players',
+    },
+    de: {
+        gameMode: 'Spielmodus auswaehlen',
+        mode: 'Gegen einen Freund oder die KI spielen',
+        bestOf: 'Anzahl der Runden fuer den Gesamtsieger',
+        map: 'Arena-Layout auswaehlen',
+        hp: 'Start-Lebenspunkte fuer jeden Spieler',
+        puFreq: 'Wie oft Power-Ups auf der Karte erscheinen',
+        aiDiff: 'Wie schlau der Computergegner spielt',
+        gravity: 'Beeinflusst Springhoehe und Fallgeschwindigkeit',
+        suddenDeath: 'Nach dem Timer brechen Plattformen auseinander!',
+        dropThrough: 'Nach unten druecken, um durch Plattformen zu fallen',
+        infiniteAmmo: 'Unbegrenzte Munition ohne Pickups',
+        ammoFreq: 'Wie oft Munitions-Pickups erscheinen',
+        tagWinRule: 'Wer gewinnt: Nicht-Faenger oder kuerzeste Zeit',
+        tagDuration: 'Wie lange eine Fangen-Runde dauert',
+        knockback: 'Wie weit Kugeln Spieler zurueckstossen',
+        lavaLives: 'Wie viele Leben jeder Spieler hat',
+        lavaStartSpeed: 'Wie schnell die Lava zu Beginn steigt',
+        lavaAccel: 'Wie stark die Lava ueber die Zeit schneller wird',
+        keepInventory: 'Power-Ups nach dem Tod behalten',
+        bg: 'Hintergrund-Design aendern',
+        lang: 'Zwischen Englisch und Deutsch wechseln',
+        p1Skin: 'Farbe von Spieler 1 aendern',
+        p2Skin: 'Farbe von Spieler 2 aendern',
+        controls: 'Tastenbelegung fuer beide Spieler anpassen',
+    },
+};
 
 // --- Settings Persistence (localStorage) ---
 const SETTINGS_KEY = 'shoooter2d_settings';
@@ -570,6 +643,13 @@ function getGameplaySettingsItems() {
     return items;
 }
 
+// Advanced settings: everything from gameplay EXCEPT gameMode, mode, bestOf
+function getAdvancedSettingsItems() {
+    return getGameplaySettingsItems().filter(item =>
+        item.key !== 'gameMode' && item.key !== 'mode' && item.key !== 'bestOf'
+    );
+}
+
 function handleGameplaySettingChange(key, dir) {
     const cycle = (val, len) => (val + dir + len) % len;
     switch (key) {
@@ -597,6 +677,11 @@ function handleGameplaySettingChange(key, dir) {
         case 'lavaStartSpeed': settings.lavaStartSpeed = cycle(settings.lavaStartSpeed, LAVA_START_SPEED_OPTIONS.length); break;
         case 'lavaAccel': settings.lavaAccel = cycle(settings.lavaAccel, LAVA_ACCEL_OPTIONS.length); break;
         case 'keepInventory': settings.keepInventory = cycle(settings.keepInventory, 2); break;
+        case 'map': {
+            const avMaps = getAvailableMaps();
+            settings.map = cycle(settings.map, avMaps.length);
+            break;
+        }
     }
 }
 
@@ -695,7 +780,19 @@ const BG_THEMES = [
 ];
 let showHowToPlay = false;
 let htpScroll = 0;
+let showCredits = false;
+let creditsStartTime = 0;
+let creditsScene = null; // holds the animated battle scene state
+let editingName = null; // null, 'p1', or 'p2' — which player name is being edited
+let customizeOpen = { p1: false, p2: false }; // customize panels on start screen
+let gamePaused = false;
+let pauseCursor = 0; // 0=Resume, 1=Sound, 2=Settings, 3=Back to start
+let settingsReturnState = 'start'; // where to go when leaving settings
+let settingsReturnPaused = false; // was game paused when settings opened?
 let roundWins = { p1: 0, p2: 0 };
+let killFeed = []; // { killer: name, victim: name, killerColor: color, victimColor: color, time: Date.now() }
+let countdownTimer = 0; // frames remaining for 3-2-1-GO countdown
+let pauseConfirm = false; // confirmation dialog for leaving game
 
 // --- Key Rebinding ---
 let rebindState = null; // null = not rebinding, otherwise { player: 1|2, action: string, step: number }
@@ -730,6 +827,8 @@ function getKeyDisplayName(code) {
         'Numpad0': 'Num0', 'Numpad1': 'Num1', 'Numpad2': 'Num2', 'Numpad3': 'Num3',
         'Numpad4': 'Num4', 'Numpad5': 'Num5', 'Numpad6': 'Num6', 'Numpad7': 'Num7',
         'Numpad8': 'Num8', 'Numpad9': 'Num9',
+        'Mouse0': 'LMB', 'Mouse1': 'MMB', 'Mouse2': 'RMB',
+        'Mouse3': 'Mouse4', 'Mouse4': 'Mouse5',
     };
     return names[code] || code;
 }
@@ -742,7 +841,212 @@ let stats = {
 
 // --- Input ---
 const keys = {};
+const mouse = { x: 0, y: 0, clicked: false, button: 0 };
+canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    mouse.x = (e.clientX - rect.left) * (canvas.width / rect.width);
+    mouse.y = (e.clientY - rect.top) * (canvas.height / rect.height);
+    if (lastScrollTime > 0 && !mouseMovedAfterScroll) {
+        const dist = Math.hypot(mouse.x - scrollMouseX, mouse.y - scrollMouseY);
+        if (dist > 15) mouseMovedAfterScroll = true;
+    }
+});
+canvas.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    mouse.clicked = true;
+    mouse.button = e.button;
+});
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+// Mouse button support for gameplay keys
+canvas.addEventListener('mousedown', (e) => {
+    const code = 'Mouse' + e.button;
+    keys[code] = true;
+    // Mouse button rebinding: treat as if a key was pressed
+    if (gameState === 'rebind' && rebindState) {
+        const pKey = rebindState.player === 1 ? 'p1' : 'p2';
+        const otherKey = rebindState.player === 1 ? 'p2' : 'p1';
+        let duplicate = false;
+        for (const action of KEY_ACTIONS) {
+            if (action !== rebindState.action && customBindings[pKey][action] === code) { duplicate = true; break; }
+        }
+        if (!duplicate) {
+            for (const action of KEY_ACTIONS) {
+                if (customBindings[otherKey][action] === code) { duplicate = true; break; }
+            }
+        }
+        if (duplicate) {
+            rebindError = Date.now();
+            rebindErrorKey = code;
+        } else {
+            customBindings[pKey][rebindState.action] = code;
+            rebindState = null;
+            saveBindings();
+        }
+    }
+});
+canvas.addEventListener('mouseup', (e) => {
+    const code = 'Mouse' + e.button;
+    keys[code] = false;
+});
+let lastScrollTime = 0;
+let mouseMovedAfterScroll = true; // also used to suppress hover during keyboard navigation
+let scrollMouseX = 0, scrollMouseY = 0;
+let lastWheelTime = 0;
+canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const now = Date.now();
+    lastWheelTime = now;
+    lastScrollTime = now;
+    mouseMovedAfterScroll = false;
+    scrollMouseX = mouse.x;
+    scrollMouseY = mouse.y;
+    const dir = e.deltaY > 0 ? 1 : -1;
+    if (showHowToPlay) {
+        htpScroll = Math.max(0, htpScroll + dir * 40);
+    } else if (gameState === 'startmenu') {
+        if (startMenuAdvanced) {
+            const advItems = getAdvancedSettingsItems();
+            const advSpacing = 48;
+            const maxVis = Math.floor((460 - 78) / advSpacing);
+            startMenuCursor = Math.max(0, Math.min(advItems.length - 1, startMenuCursor + dir));
+            if (startMenuCursor < settingsScroll) settingsScroll = startMenuCursor;
+            if (startMenuCursor >= settingsScroll + maxVis) settingsScroll = startMenuCursor - maxVis + 1;
+        } else {
+            startMenuCursor = Math.max(0, Math.min(3, startMenuCursor + dir));
+        }
+    } else if (gameState === 'settings') {
+        const advItems = getAdvancedSettingsItems();
+        const advSpacing = 48;
+        const maxVis = Math.floor((460 - 78) / advSpacing);
+        settingsCursor = Math.max(0, Math.min(advItems.length - 1, settingsCursor + dir));
+        if (settingsCursor < settingsScroll) settingsScroll = settingsCursor;
+        if (settingsCursor >= settingsScroll + maxVis) settingsScroll = settingsCursor - maxVis + 1;
+    }
+}, { passive: false });
+function mouseInBox(bx, by, bw, bh) {
+    return mouse.x >= bx && mouse.x <= bx + bw && mouse.y >= by && mouse.y <= by + bh;
+}
+
+// --- Reusable Scrollbar ---
+let scrollbarDragging = null; // { id, startY, startVal }
+canvas.addEventListener('mouseup', () => { scrollbarDragging = null; });
+
+// Draw + interact with a scrollbar. Returns updated scrollVal.
+// trackX, trackY, trackH: position/size of the scrollbar track
+// scrollVal: current scroll (0-based), maxScroll: maximum scroll value
+// id: unique string to track dragging state
+function drawScrollbar(trackX, trackY, trackH, scrollVal, maxScroll, id) {
+    if (maxScroll <= 0) return scrollVal;
+
+    const barW = 6;
+    const minThumbH = 20;
+    const thumbH = Math.max(minThumbH, (trackH / (trackH + maxScroll * 8)) * trackH);
+    const thumbMaxY = trackH - thumbH;
+    const thumbY = trackY + (scrollVal / maxScroll) * thumbMaxY;
+
+    // Track
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
+    ctx.fillRect(trackX, trackY, barW, trackH);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+    ctx.fillRect(trackX, trackY, barW, 1);
+    ctx.fillRect(trackX, trackY + trackH - 1, barW, 1);
+
+    // Thumb
+    const thumbHover = mouseInBox(trackX - 4, thumbY, barW + 8, thumbH);
+    const isDragging = scrollbarDragging && scrollbarDragging.id === id;
+    ctx.fillStyle = isDragging ? '#ffdd00' : (thumbHover ? '#aaa' : 'rgba(255, 255, 255, 0.3)');
+    ctx.fillRect(trackX, thumbY, barW, thumbH);
+    // Thumb border
+    ctx.fillStyle = isDragging ? '#ffdd00' : (thumbHover ? '#ccc' : 'rgba(255, 255, 255, 0.15)');
+    ctx.fillRect(trackX, thumbY, barW, 1);
+    ctx.fillRect(trackX, thumbY + thumbH - 1, barW, 1);
+
+    // Click on track to jump
+    if (mouse.clicked && mouseInBox(trackX - 4, trackY, barW + 8, trackH) && !thumbHover) {
+        const clickRatio = (mouse.y - trackY - thumbH / 2) / thumbMaxY;
+        scrollVal = Math.max(0, Math.min(maxScroll, Math.round(clickRatio * maxScroll)));
+    }
+
+    // Start dragging thumb
+    if (mouse.clicked && thumbHover) {
+        scrollbarDragging = { id, startMouseY: mouse.y, startVal: scrollVal };
+    }
+
+    // Dragging
+    if (isDragging) {
+        const dy = mouse.y - scrollbarDragging.startMouseY;
+        const valPerPx = maxScroll / thumbMaxY;
+        scrollVal = Math.max(0, Math.min(maxScroll, Math.round(scrollbarDragging.startVal + dy * valPerPx)));
+    }
+
+    return scrollVal;
+}
 window.addEventListener('keydown', (e) => {
+    // Pause menu — handle ALL input here and return immediately
+    if (gamePaused && (gameState === 'playing' || gameState === 'gameover' || gameState === 'dying' || gameState === 'roundover')) {
+        e.preventDefault();
+        if (pauseConfirm) {
+            // Confirmation dialog active
+            if (e.code === 'Enter' || e.code === 'Space') {
+                // Confirm leave
+                pauseConfirm = false;
+                gamePaused = false;
+                AI.reset();
+                if (player2) {
+                    const c = player2.controls;
+                    keys[c.left] = false;
+                    keys[c.right] = false;
+                    keys[c.jump] = false;
+                    keys[c.shoot] = false;
+                    keys[c.down] = false;
+                }
+                gameMode = null;
+                roundWins = { p1: 0, p2: 0 };
+                gameState = 'start';
+            } else if (e.code === 'Escape' || e.code === 'KeyN') {
+                pauseConfirm = false;
+            }
+            return;
+        }
+        if (e.code === 'Escape') {
+            gamePaused = false;
+        } else if (e.code === 'ArrowUp' || e.code === 'KeyW') {
+            pauseCursor = (pauseCursor - 1 + 4) % 4;
+            mouseMovedAfterScroll = false;
+        } else if (e.code === 'ArrowDown' || e.code === 'KeyS') {
+            pauseCursor = (pauseCursor + 1) % 4;
+            mouseMovedAfterScroll = false;
+        } else if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+            if (pauseCursor === 1) {
+                settings.volume = Math.max(0, settings.volume - 1);
+                if (settings.volume === 0) settings.sound = 1; else settings.sound = 0;
+                saveSettings();
+            }
+        } else if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+            if (pauseCursor === 1) {
+                settings.volume = Math.min(10, settings.volume + 1);
+                if (settings.volume === 0) settings.sound = 1; else settings.sound = 0;
+                saveSettings();
+            }
+        } else if (e.code === 'Enter' || e.code === 'Space') {
+            if (pauseCursor === 0) {
+                gamePaused = false;
+            } else if (pauseCursor === 1) {
+                settings.sound = settings.sound === 0 ? 1 : 0;
+                saveSettings();
+            } else if (pauseCursor === 2) {
+                settingsReturnState = gameState;
+                settingsReturnPaused = true;
+                gamePaused = false;
+                gameState = 'settings';
+                settingsCategory = 0;
+                settingsCursor = 0;
+            } else if (pauseCursor === 3) {
+                pauseConfirm = true; // Show confirmation dialog
+            }
+        }
+        return; // Block ALL keys from reaching game
+    }
     // Block P2 keyboard input when playing against AI
     if (gameMode === 'pve' && gameState === 'playing' && player2) {
         const c = player2.controls;
@@ -758,25 +1062,128 @@ window.addEventListener('keydown', (e) => {
 
     // --- Start Screen ---
     if (gameState === 'start') {
-        if (e.code === 'Enter') {
-            // Quick start with current settings
-            gameMode = settings.mode === 0 ? 'pvp' : 'pve';
-            const avMaps = getAvailableMaps();
-            const mapIdx = Math.min(settings.map, avMaps.length - 1);
-            if (settings.gameMode !== 4) {
-                platforms = MAPS[avMaps[mapIdx]].platforms;
+        if (showCredits) {
+            if (e.code === 'Escape' || e.code === 'Enter' || e.code === 'Space') {
+                showCredits = false;
+                creditsScene = null;
             }
-            roundWins = { p1: 0, p2: 0 };
-            prerenderBackground();
-            resetGame();
-        }
-        if (e.code === 'Space') {
-            gameState = 'settings';
-            settingsCursor = 0;
+        } else if (showHowToPlay) {
+            if (e.code === 'Escape' || e.code === 'Enter' || e.code === 'Space') {
+                showHowToPlay = false;
+                htpScroll = 0;
+            }
+            if (e.code === 'ArrowDown' || e.code === 'KeyS') htpScroll += 30;
+            if (e.code === 'ArrowUp' || e.code === 'KeyW') htpScroll = Math.max(0, htpScroll - 30);
+        } else if (editingName) {
+            e.preventDefault();
+            const key = editingName === 'p1' ? 'p1Name' : 'p2Name';
+            if (e.code === 'Enter') {
+                editingName = null;
+                saveSettings();
+            } else if (e.code === 'Backspace') {
+                settings[key] = settings[key].slice(0, -1);
+            } else if (e.key.length === 1 && settings[key].length < 14) {
+                settings[key] += e.key;
+            }
+        } else {
+            if (e.code === 'Enter') {
+                gameState = 'startmenu';
+                startMenuCursor = 0;
+                startMenuAdvanced = false;
+                customizeOpen = { p1: false, p2: false };
+            }
+            if (e.code === 'Escape') {
+                customizeOpen = { p1: false, p2: false };
+            }
         }
     }
 
-    // --- Settings Screen ---
+    // --- Start Menu ---
+    else if (gameState === 'startmenu') {
+        if (startMenuAdvanced) {
+            // Advanced settings sub-screen
+            const advItems = getAdvancedSettingsItems();
+            const advCount = advItems.length;
+            if (startMenuCursor >= advCount) startMenuCursor = advCount - 1;
+            const maxVis = Math.floor((460 - 78) / 48);
+            if (e.code === 'ArrowUp' || e.code === 'KeyW') {
+                startMenuCursor = (startMenuCursor - 1 + advCount) % advCount;
+                mouseMovedAfterScroll = false;
+            }
+            if (e.code === 'ArrowDown' || e.code === 'KeyS') {
+                startMenuCursor = (startMenuCursor + 1) % advCount;
+                mouseMovedAfterScroll = false;
+            }
+            if (startMenuCursor < settingsScroll) settingsScroll = startMenuCursor;
+            if (startMenuCursor >= settingsScroll + maxVis) settingsScroll = startMenuCursor - maxVis + 1;
+            if (startMenuCursor === 0 && settingsScroll > 0) settingsScroll = 0;
+            if (startMenuCursor === advCount - 1) settingsScroll = Math.max(0, advCount - maxVis);
+
+            if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+                const item = advItems[startMenuCursor];
+                if (item) handleGameplaySettingChange(item.key, -1);
+                saveSettings();
+            }
+            if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+                const item = advItems[startMenuCursor];
+                if (item) handleGameplaySettingChange(item.key, 1);
+                saveSettings();
+            }
+            if (e.code === 'Escape') {
+                gameState = 'start';
+                startMenuAdvanced = false;
+                startMenuCursor = 0;
+                settingsScroll = 0;
+            }
+            if (e.code === 'Enter') {
+                // Start game from advanced settings
+                gameMode = settings.mode === 0 ? 'pvp' : 'pve';
+                const avMaps = getAvailableMaps();
+                const mapIdx = Math.min(settings.map, avMaps.length - 1);
+                if (settings.gameMode !== 4) platforms = MAPS[avMaps[mapIdx]].platforms;
+                roundWins = { p1: 0, p2: 0 };
+                startMenuAdvanced = false;
+                prerenderBackground();
+                resetGame();
+            }
+        } else {
+            // Main start menu: Game Mode, PvP/PvAI, Rounds
+            const menuCount = 4; // gameMode, mode, bestOf, map
+            if (e.code === 'ArrowUp' || e.code === 'KeyW') {
+                startMenuCursor = (startMenuCursor - 1 + menuCount) % menuCount;
+                mouseMovedAfterScroll = false;
+            }
+            if (e.code === 'ArrowDown' || e.code === 'KeyS') {
+                startMenuCursor = (startMenuCursor + 1) % menuCount;
+                mouseMovedAfterScroll = false;
+            }
+            if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+                const keys = ['gameMode', 'mode', 'bestOf', 'map'];
+                handleGameplaySettingChange(keys[startMenuCursor], -1);
+                saveSettings();
+            }
+            if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+                const menuKeys = ['gameMode', 'mode', 'bestOf', 'map'];
+                handleGameplaySettingChange(menuKeys[startMenuCursor], 1);
+                saveSettings();
+            }
+            if (e.code === 'Enter') {
+                // Start game
+                gameMode = settings.mode === 0 ? 'pvp' : 'pve';
+                const avMaps = getAvailableMaps();
+                const mapIdx = Math.min(settings.map, avMaps.length - 1);
+                if (settings.gameMode !== 4) platforms = MAPS[avMaps[mapIdx]].platforms;
+                roundWins = { p1: 0, p2: 0 };
+                prerenderBackground();
+                resetGame();
+            }
+            if (e.code === 'Escape') {
+                gameState = 'start';
+            }
+        }
+    }
+
+    // --- Settings Screen (System only) ---
     else if (gameState === 'settings') {
         if (showHowToPlay) {
             if (e.code === 'KeyH' || e.code === 'Escape' || e.code === 'Enter' || e.code === 'Space') {
@@ -785,56 +1192,33 @@ window.addEventListener('keydown', (e) => {
             }
             if (e.code === 'ArrowDown' || e.code === 'KeyS') htpScroll += 30;
             if (e.code === 'ArrowUp' || e.code === 'KeyW') htpScroll = Math.max(0, htpScroll - 30);
-        } else if (settingsCategory === -1) {
-            // Category selection: System or Gameplay
-            if (e.code === 'ArrowUp' || e.code === 'KeyW' || e.code === 'ArrowLeft' || e.code === 'KeyA') {
-                settingsCursor = settingsCursor === 0 ? 1 : 0;
-            }
-            if (e.code === 'ArrowDown' || e.code === 'KeyS' || e.code === 'ArrowRight' || e.code === 'KeyD') {
-                settingsCursor = settingsCursor === 0 ? 1 : 0;
-            }
-            if (e.code === 'Enter' || e.code === 'Space') {
-                settingsCategory = settingsCursor;
-                settingsCursor = 0;
-                settingsScroll = 0;
-            }
-            if (e.code === 'KeyH') {
-                showHowToPlay = true;
-            }
-            if (e.code === 'Escape') {
-                gameState = 'start';
-            }
-        } else if (settingsCategory === 0) {
-            // System settings: Map, Background, Sound, Language, P1 Color, P2 Color, Controls
-            const sysCount = 7;
+        } else {
+            // System settings: Background, Language, P1 Color, P2 Color, Controls
+            const sysCount = 5;
             if (e.code === 'ArrowUp' || e.code === 'KeyW') {
                 settingsCursor = (settingsCursor - 1 + sysCount) % sysCount;
+                mouseMovedAfterScroll = false;
             }
             if (e.code === 'ArrowDown' || e.code === 'KeyS') {
                 settingsCursor = (settingsCursor + 1) % sysCount;
+                mouseMovedAfterScroll = false;
             }
             if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
-                const avMaps = getAvailableMaps();
-                if (settingsCursor === 0) settings.map = (settings.map - 1 + avMaps.length) % avMaps.length;
-                if (settingsCursor === 1) { settings.bg = (settings.bg - 1 + BG_THEMES.length) % BG_THEMES.length; prerenderBackground(); }
-                if (settingsCursor === 2) settings.sound = (settings.sound - 1 + SOUND_OPTIONS.length) % SOUND_OPTIONS.length;
-                if (settingsCursor === 3) settings.lang = (settings.lang - 1 + LANG_OPTIONS.length) % LANG_OPTIONS.length;
-                if (settingsCursor === 4) { settings.p1Skin = (settings.p1Skin - 1 + SKIN_OPTIONS.length) % SKIN_OPTIONS.length; updateSkins(); }
-                if (settingsCursor === 5) { settings.p2Skin = (settings.p2Skin - 1 + SKIN_OPTIONS.length) % SKIN_OPTIONS.length; updateSkins(); }
+                if (settingsCursor === 0) { settings.bg = (settings.bg - 1 + BG_THEMES.length) % BG_THEMES.length; prerenderBackground(); }
+                if (settingsCursor === 1) settings.lang = (settings.lang - 1 + LANG_OPTIONS.length) % LANG_OPTIONS.length;
+                if (settingsCursor === 2) { settings.p1Skin = (settings.p1Skin - 1 + SKIN_OPTIONS.length) % SKIN_OPTIONS.length; updateSkins(); }
+                if (settingsCursor === 3) { settings.p2Skin = (settings.p2Skin - 1 + SKIN_OPTIONS.length) % SKIN_OPTIONS.length; updateSkins(); }
                 saveSettings();
             }
             if (e.code === 'ArrowRight' || e.code === 'KeyD') {
-                const avMaps = getAvailableMaps();
-                if (settingsCursor === 0) settings.map = (settings.map + 1) % avMaps.length;
-                if (settingsCursor === 1) { settings.bg = (settings.bg + 1) % BG_THEMES.length; prerenderBackground(); }
-                if (settingsCursor === 2) settings.sound = (settings.sound + 1) % SOUND_OPTIONS.length;
-                if (settingsCursor === 3) settings.lang = (settings.lang + 1) % LANG_OPTIONS.length;
-                if (settingsCursor === 4) { settings.p1Skin = (settings.p1Skin + 1) % SKIN_OPTIONS.length; updateSkins(); }
-                if (settingsCursor === 5) { settings.p2Skin = (settings.p2Skin + 1) % SKIN_OPTIONS.length; updateSkins(); }
+                if (settingsCursor === 0) { settings.bg = (settings.bg + 1) % BG_THEMES.length; prerenderBackground(); }
+                if (settingsCursor === 1) settings.lang = (settings.lang + 1) % LANG_OPTIONS.length;
+                if (settingsCursor === 2) { settings.p1Skin = (settings.p1Skin + 1) % SKIN_OPTIONS.length; updateSkins(); }
+                if (settingsCursor === 3) { settings.p2Skin = (settings.p2Skin + 1) % SKIN_OPTIONS.length; updateSkins(); }
                 saveSettings();
             }
             if (e.code === 'Enter' || e.code === 'Space') {
-                if (settingsCursor === 6) {
+                if (settingsCursor === 4) {
                     gameState = 'rebind';
                     rebindPlayer = 1;
                     rebindCursor = 0;
@@ -843,66 +1227,11 @@ window.addEventListener('keydown', (e) => {
             }
             if (e.code === 'KeyH') { showHowToPlay = true; }
             if (e.code === 'Escape') {
-                settingsCategory = -1;
+                gameState = settingsReturnState;
+                gamePaused = settingsReturnPaused;
                 settingsCursor = 0;
+                return; // Don't let ESC fall through to pause toggle
             }
-        } else if (settingsCategory === 1) {
-            // Gameplay settings - dynamic based on game mode
-            const gpItems = getGameplaySettingsItems();
-            const gpCount = gpItems.length;
-            // Clamp cursor to valid range (items can change when gameMode changes)
-            if (settingsCursor >= gpCount) { settingsCursor = gpCount - 1; settingsScroll = Math.max(0, gpCount - Math.floor((460 - 78) / 48)); }
-            const maxVis = Math.floor((460 - 78) / 48); // must match drawSettingsOptions
-            if (e.code === 'ArrowUp' || e.code === 'KeyW') {
-                settingsCursor = (settingsCursor - 1 + gpCount) % gpCount;
-            }
-            if (e.code === 'ArrowDown' || e.code === 'KeyS') {
-                settingsCursor = (settingsCursor + 1) % gpCount;
-            }
-            // Auto-scroll to keep cursor visible
-            if (settingsCursor < settingsScroll) settingsScroll = settingsCursor;
-            if (settingsCursor >= settingsScroll + maxVis) settingsScroll = settingsCursor - maxVis + 1;
-            // Wrap-around: cursor jumps from last to first or vice versa
-            if (settingsCursor === 0 && settingsScroll > 0) settingsScroll = 0;
-            if (settingsCursor === gpCount - 1) settingsScroll = Math.max(0, gpCount - maxVis);
-
-            if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
-                const item = gpItems[settingsCursor];
-                if (item) {
-                    handleGameplaySettingChange(item.key, -1);
-                    // Reset scroll when game mode changes (item list changes)
-                    if (item.key === 'gameMode') { settingsCursor = 0; settingsScroll = 0; }
-                }
-                saveSettings();
-            }
-            if (e.code === 'ArrowRight' || e.code === 'KeyD') {
-                const item = gpItems[settingsCursor];
-                if (item) {
-                    handleGameplaySettingChange(item.key, 1);
-                    if (item.key === 'gameMode') { settingsCursor = 0; settingsScroll = 0; }
-                }
-                saveSettings();
-            }
-            if (e.code === 'KeyH') { showHowToPlay = true; }
-            if (e.code === 'Escape') {
-                settingsCategory = -1;
-                settingsCursor = 1;
-                settingsScroll = 0;
-            }
-        }
-        // Start game from any settings sub-screen with F key
-        if (!showHowToPlay && e.code === 'KeyF') {
-            gameMode = settings.mode === 0 ? 'pvp' : 'pve';
-            const avMaps = getAvailableMaps();
-            const mapIdx = Math.min(settings.map, avMaps.length - 1);
-            if (settings.gameMode !== 4) {
-                platforms = MAPS[avMaps[mapIdx]].platforms;
-            }
-            roundWins = { p1: 0, p2: 0 };
-            showHowToPlay = false;
-            settingsCategory = -1;
-            prerenderBackground();
-            resetGame();
         }
     }
 
@@ -947,9 +1276,11 @@ window.addEventListener('keydown', (e) => {
         } else {
             if (e.code === 'ArrowUp' || e.code === 'KeyW') {
                 rebindCursor = (rebindCursor - 1 + KEY_ACTIONS.length) % KEY_ACTIONS.length;
+                mouseMovedAfterScroll = false;
             }
             if (e.code === 'ArrowDown' || e.code === 'KeyS') {
                 rebindCursor = (rebindCursor + 1) % KEY_ACTIONS.length;
+                mouseMovedAfterScroll = false;
             }
             if (e.code === 'ArrowLeft' || e.code === 'ArrowRight' || e.code === 'KeyA' || e.code === 'KeyD') {
                 rebindPlayer = rebindPlayer === 1 ? 2 : 1;
@@ -977,21 +1308,10 @@ window.addEventListener('keydown', (e) => {
         }
     }
 
-    // --- Escape from game ---
-    if ((gameState === 'playing' || gameState === 'gameover' || gameState === 'dying' || gameState === 'roundover') && e.code === 'Escape') {
-        // Clear AI virtual keys so they don't persist
-        AI.reset();
-        if (player2) {
-            const c = player2.controls;
-            keys[c.left] = false;
-            keys[c.right] = false;
-            keys[c.jump] = false;
-            keys[c.shoot] = false;
-            keys[c.down] = false;
-        }
-        gameMode = null;
-        roundWins = { p1: 0, p2: 0 };
-        gameState = 'start';
+    // --- Escape from game (open pause menu) ---
+    if ((gameState === 'playing' || gameState === 'gameover' || gameState === 'dying' || gameState === 'roundover') && e.code === 'Escape' && countdownTimer <= 0) {
+        gamePaused = true;
+        pauseCursor = 0;
     }
 });
 window.addEventListener('keyup', (e) => {
@@ -3548,7 +3868,8 @@ let player1, player2;
 function createPlayers() {
     updateSkins(); // Ensure sprites match current skin settings
     const p1Color = SKIN_OPTIONS[settings.p1Skin].primary;
-    player1 = new Player(100, 400, p1Color, 'Player 1', {
+    const p1Name = settings.p1Name || 'Player 1';
+    player1 = new Player(100, 400, p1Color, p1Name, {
         left: customBindings.p1.left,
         right: customBindings.p1.right,
         jump: customBindings.p1.jump,
@@ -3557,7 +3878,7 @@ function createPlayers() {
         facingDefault: 1,
     }, sprites1);
 
-    const p2Name = gameMode === 'pve' ? 'AI' : 'Player 2';
+    const p2Name = gameMode === 'pve' ? 'AI' : (settings.p2Name || 'Player 2');
     const p2Color = SKIN_OPTIONS[settings.p2Skin].primary;
     player2 = new Player(650, 400, p2Color, p2Name, {
         left: customBindings.p2.left,
@@ -3868,18 +4189,21 @@ function checkWin() {
                 winner = player2; loser = player1; roundWins.p2++;
             }
             deathTimer = DEATH_DURATION;
+            killFeed.push({ killer: winner.name, victim: loser.name, killerColor: winner.color, victimColor: loser.color, time: Date.now() });
         } else if (p1Dead) {
             gameState = 'dying';
             winner = player2;
             loser = player1;
             deathTimer = DEATH_DURATION;
             roundWins.p2++;
+            killFeed.push({ killer: player2.name, victim: player1.name, killerColor: player2.color, victimColor: player1.color, time: Date.now() });
         } else if (p2Dead) {
             gameState = 'dying';
             winner = player1;
             loser = player2;
             deathTimer = DEATH_DURATION;
             roundWins.p1++;
+            killFeed.push({ killer: player1.name, victim: player2.name, killerColor: player1.color, victimColor: player2.color, time: Date.now() });
         }
     }
 
@@ -3899,6 +4223,7 @@ function checkWin() {
         // Also check HP death (respawn in KOTH instead of game over)
         if (player1.hp <= 0) {
             stats.p1.deaths++;
+            killFeed.push({ killer: player2.name, victim: player1.name, killerColor: player2.color, victimColor: player1.color, time: Date.now() });
             player1.hp = HP_OPTIONS[settings.hp];
             player1.x = 100;
             player1.y = 400;
@@ -3915,6 +4240,7 @@ function checkWin() {
         }
         if (player2.hp <= 0) {
             stats.p2.deaths++;
+            killFeed.push({ killer: player1.name, victim: player2.name, killerColor: player1.color, victimColor: player2.color, time: Date.now() });
             player2.hp = HP_OPTIONS[settings.hp];
             player2.x = 650;
             player2.y = 400;
@@ -4484,43 +4810,170 @@ function drawStartScreen() {
     const p1SkinColor = SKIN_OPTIONS[settings.p1Skin].primary;
     const p2SkinColor = SKIN_OPTIONS[settings.p2Skin].primary;
 
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-    ctx.fillRect(120, 225, 220, 100);
-    ctx.fillRect(460, 225, 220, 100);
-
-    // Pixel borders
-    ctx.fillStyle = p1SkinColor;
-    ctx.fillRect(120, 225, 220, 2);
-    ctx.fillRect(120, 323, 220, 2);
-    ctx.fillStyle = p2SkinColor;
-    ctx.fillRect(460, 225, 220, 2);
-    ctx.fillRect(460, 323, 220, 2);
-
-    ctx.font = 'bold 12px monospace';
-    ctx.textAlign = 'left';
-
     const b1 = customBindings.p1;
     const b2 = customBindings.p2;
     const K = getKeyDisplayName;
 
-    ctx.fillStyle = p1SkinColor;
-    ctx.fillText(T('player1'), 135, 242);
-    ctx.fillStyle = '#aaa';
-    ctx.font = '11px monospace';
-    ctx.fillText(T('move') + '      ' + K(b1.left) + ' / ' + K(b1.right), 135, 260);
-    ctx.fillText(T('jump') + '      ' + K(b1.jump), 135, 277);
-    ctx.fillText(T('drop') + '      ' + K(b1.down), 135, 294);
-    ctx.fillText(T('shoot') + '     ' + K(b1.shoot), 135, 311);
+    // Helper: draw customize panel or controls box for a player
+    function drawPlayerPanel(pKey, boxX, boxY, skinColor, bindings, spriteSet, playerNum) {
+        const boxW = 220, boxH = 100;
+        const isOpen = customizeOpen[pKey];
 
-    ctx.font = 'bold 12px monospace';
-    ctx.fillStyle = p2SkinColor;
-    ctx.fillText(T('player2'), 475, 242);
-    ctx.fillStyle = '#aaa';
-    ctx.font = '11px monospace';
-    ctx.fillText(T('move') + '      ' + K(b2.left) + ' / ' + K(b2.right), 475, 260);
-    ctx.fillText(T('jump') + '      ' + K(b2.jump), 475, 277);
-    ctx.fillText(T('drop') + '      ' + K(b2.down), 475, 294);
-    ctx.fillText(T('shoot') + '     ' + K(b2.shoot), 475, 311);
+        if (isOpen) {
+            // --- Customize Panel ---
+            const panelH = 130;
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(boxX, boxY, boxW, panelH);
+            ctx.fillStyle = skinColor;
+            ctx.fillRect(boxX, boxY, boxW, 2);
+            ctx.fillRect(boxX, boxY + panelH - 2, boxW, 2);
+            ctx.fillRect(boxX, boxY, 2, panelH);
+            ctx.fillRect(boxX + boxW - 2, boxY, 2, panelH);
+
+            // X close button (top right of panel)
+            const closeX = boxX + boxW - 18;
+            const closeY = boxY + 4;
+            const closeHover = mouseInBox(closeX, closeY, 14, 14);
+            ctx.fillStyle = closeHover ? '#e94560' : '#888';
+            drawPixelText('X', closeX + 7, closeY + 10, 9, closeHover ? '#e94560' : '#888');
+            if (mouse.clicked && closeHover) {
+                customizeOpen[pKey] = false;
+                editingName = null;
+            }
+
+            // Title
+            drawPixelText(settings.lang === 0 ? 'CUSTOMIZE' : 'ANPASSEN', boxX + boxW / 2, boxY + 18, 11, skinColor);
+
+            // Name field
+            const nameKey = pKey === 'p1' ? 'p1Name' : 'p2Name';
+            const nameY = boxY + 34;
+            const nameFieldX = boxX + 10;
+            const nameFieldW = boxW - 20;
+            const nameFieldH = 22;
+            const nameHover = mouseInBox(nameFieldX, nameY, nameFieldW, nameFieldH);
+            const isEditing = editingName === pKey;
+
+            ctx.fillStyle = isEditing ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.3)';
+            ctx.fillRect(nameFieldX, nameY, nameFieldW, nameFieldH);
+            ctx.fillStyle = isEditing ? '#fff' : (nameHover ? '#aaa' : '#666');
+            ctx.fillRect(nameFieldX, nameY, nameFieldW, 1);
+            ctx.fillRect(nameFieldX, nameY + nameFieldH - 1, nameFieldW, 1);
+            ctx.fillRect(nameFieldX, nameY, 1, nameFieldH);
+            ctx.fillRect(nameFieldX + nameFieldW - 1, nameY, 1, nameFieldH);
+
+            const nameLabel = settings.lang === 0 ? 'Name: ' : 'Name: ';
+            const nameText = settings[nameKey] || '';
+            const cursor = isEditing && Math.floor(Date.now() / 500) % 2 ? '|' : '';
+            const placeholder = !nameText && !isEditing ? (pKey === 'p1' ? T('player1') : T('player2')) : '';
+            if (placeholder) {
+                drawPixelText(placeholder, boxX + boxW / 2, nameY + 14, 9, '#555');
+            } else {
+                drawPixelText(nameText + cursor, boxX + boxW / 2, nameY + 14, 9, isEditing ? '#fff' : skinColor);
+            }
+
+            if (mouse.clicked && nameHover) { editingName = pKey; }
+            if (mouse.clicked && !nameHover && editingName === pKey) { editingName = null; saveSettings(); }
+
+            // Skin selector
+            const skinY = boxY + 64;
+            const skinKey = pKey === 'p1' ? 'p1Skin' : 'p2Skin';
+            const skinLang = settings.lang === 0 ? 'name' : 'nameDE';
+            const skinName = SKIN_OPTIONS[settings[skinKey]][skinLang];
+
+            drawPixelText(settings.lang === 0 ? 'Color:' : 'Farbe:', boxX + 40, skinY + 4, 9, '#aaa');
+
+            // Left arrow
+            const arrowLX = boxX + 70;
+            const arrowLHover = mouseInBox(arrowLX, skinY - 8, 20, 20);
+            drawPixelText('<', arrowLX + 10, skinY + 4, 12, arrowLHover ? '#ffdd00' : '#888');
+            if (mouse.clicked && arrowLHover) {
+                settings[skinKey] = (settings[skinKey] - 1 + SKIN_OPTIONS.length) % SKIN_OPTIONS.length;
+                updateSkins();
+                saveSettings();
+            }
+
+            // Skin name
+            drawPixelText(skinName, boxX + boxW / 2 + 10, skinY + 4, 10, '#fff');
+
+            // Right arrow
+            const arrowRX = boxX + boxW - 30;
+            const arrowRHover = mouseInBox(arrowRX, skinY - 8, 20, 20);
+            drawPixelText('>', arrowRX + 10, skinY + 4, 12, arrowRHover ? '#ffdd00' : '#888');
+            if (mouse.clicked && arrowRHover) {
+                settings[skinKey] = (settings[skinKey] + 1) % SKIN_OPTIONS.length;
+                updateSkins();
+                saveSettings();
+            }
+
+            // Color swatch + sprite preview
+            const swatchY = skinY + 16;
+            const skin = SKIN_OPTIONS[settings[skinKey]];
+            const swS = 20;
+            const swX = boxX + boxW / 2 - swS / 2 - 16;
+            ctx.fillStyle = skin.primary;
+            ctx.fillRect(swX, swatchY, swS, swS);
+            ctx.fillStyle = '#000';
+            ctx.fillRect(swX, swatchY, swS, 1); ctx.fillRect(swX, swatchY + swS - 1, swS, 1);
+            ctx.fillRect(swX, swatchY, 1, swS); ctx.fillRect(swX + swS - 1, swatchY, 1, swS);
+
+            // Mini sprite
+            const previewSprites = pKey === 'p1' ? sprites1 : sprites2;
+            drawSprite(previewSprites.idle[0], swX + swS + 10, swatchY - 2, 1, false);
+        } else {
+            // --- Normal Controls Box ---
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            ctx.fillRect(boxX, boxY, boxW, boxH);
+            ctx.fillStyle = skinColor;
+            ctx.fillRect(boxX, boxY, boxW, 2);
+            ctx.fillRect(boxX, boxY + boxH - 2, boxW, 2);
+
+            // Player name
+            const nameKey = pKey === 'p1' ? 'p1Name' : 'p2Name';
+            const nameText = settings[nameKey] || (pKey === 'p1' ? T('player1') : T('player2'));
+            ctx.font = 'bold 12px monospace';
+            ctx.textAlign = 'left';
+            ctx.fillStyle = skinColor;
+            ctx.fillText(nameText, boxX + 15, boxY + 17);
+
+            ctx.fillStyle = '#aaa';
+            ctx.font = '11px monospace';
+            ctx.fillText(T('move') + '      ' + K(bindings.left) + ' / ' + K(bindings.right), boxX + 15, boxY + 35);
+            ctx.fillText(T('jump') + '      ' + K(bindings.jump), boxX + 15, boxY + 52);
+            ctx.fillText(T('drop') + '      ' + K(bindings.down), boxX + 15, boxY + 69);
+            ctx.fillText(T('shoot') + '     ' + K(bindings.shoot), boxX + 15, boxY + 86);
+        }
+    }
+
+    drawPlayerPanel('p1', 120, 225, p1SkinColor, b1, sprites1, 1);
+    drawPlayerPanel('p2', 460, 225, p2SkinColor, b2, sprites2, 2);
+
+    // Hover areas over player sprites for customize buttons (drawn on top)
+    const p1SpriteHover = mouseInBox(150, 160, 100, 65);
+    const p2SpriteHover = mouseInBox(530, 160, 100, 65);
+
+    if (p1SpriteHover && !customizeOpen.p1) {
+        const cbW = 80, cbH = 18;
+        const cbX = 180 - cbW / 2, cbY = 215;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        ctx.fillRect(cbX, cbY, cbW, cbH);
+        ctx.fillStyle = p1SkinColor;
+        ctx.fillRect(cbX, cbY, cbW, 1); ctx.fillRect(cbX, cbY + cbH - 1, cbW, 1);
+        ctx.fillRect(cbX, cbY, 1, cbH); ctx.fillRect(cbX + cbW - 1, cbY, 1, cbH);
+        drawPixelText(settings.lang === 0 ? 'Customize' : 'Anpassen', cbX + cbW / 2, cbY + 12, 8, p1SkinColor);
+        if (mouse.clicked) { customizeOpen.p1 = true; }
+    }
+
+    if (p2SpriteHover && !customizeOpen.p2) {
+        const cbW = 80, cbH = 18;
+        const cbX = 580 - cbW / 2, cbY = 215;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        ctx.fillRect(cbX, cbY, cbW, cbH);
+        ctx.fillStyle = p2SkinColor;
+        ctx.fillRect(cbX, cbY, cbW, 1); ctx.fillRect(cbX, cbY + cbH - 1, cbW, 1);
+        ctx.fillRect(cbX, cbY, 1, cbH); ctx.fillRect(cbX + cbW - 1, cbY, 1, cbH);
+        drawPixelText(settings.lang === 0 ? 'Customize' : 'Anpassen', cbX + cbW / 2, cbY + 12, 8, p2SkinColor);
+        if (mouse.clicked) { customizeOpen.p2 = true; }
+    }
 
     // Power-Up legend (two rows)
     let puTypes = Object.entries(POWERUP_TYPES).filter(([k, v]) => !v.lavaOnly || settings.gameMode === 4);
@@ -4578,16 +5031,414 @@ function drawStartScreen() {
         }
     }
 
-    // Start prompts
+    // Speaker icon — top left corner with frame
+    const spkX = 44, spkY = 32, spkR = 14;
+    const spkFrameP = 6;
+    const spkFrameSize = spkR + spkFrameP;
+    const spkHover = mouseInBox(spkX - spkFrameSize, spkY - spkFrameSize, spkFrameSize * 2, spkFrameSize * 2);
+    const soundOn = settings.sound === 0;
+
+    // Frame
+    ctx.fillStyle = spkHover ? 'rgba(78, 205, 196, 0.1)' : 'rgba(0, 0, 0, 0.3)';
+    ctx.fillRect(spkX - spkFrameSize, spkY - spkFrameSize, spkFrameSize * 2, spkFrameSize * 2);
+    ctx.fillStyle = spkHover ? '#4ecdc4' : '#555';
+    ctx.fillRect(spkX - spkFrameSize, spkY - spkFrameSize, spkFrameSize * 2, 1);
+    ctx.fillRect(spkX - spkFrameSize, spkY + spkFrameSize - 1, spkFrameSize * 2, 1);
+    ctx.fillRect(spkX - spkFrameSize, spkY - spkFrameSize, 1, spkFrameSize * 2);
+    ctx.fillRect(spkX + spkFrameSize - 1, spkY - spkFrameSize, 1, spkFrameSize * 2);
+
+    // Speaker body (pixel art style)
+    const sc = spkHover ? '#4ecdc4' : '#888';
+    ctx.fillStyle = sc;
+    // Speaker box
+    ctx.fillRect(spkX - 8, spkY - 4, 6, 8);
+    // Speaker cone
+    ctx.fillRect(spkX - 2, spkY - 8, 4, 16);
+    if (soundOn) {
+        // Sound waves
+        ctx.fillRect(spkX + 5, spkY - 3, 2, 6);
+        ctx.fillRect(spkX + 9, spkY - 6, 2, 12);
+    }
+
+    // Click to toggle sound
+    if (mouse.clicked && spkHover) {
+        settings.sound = settings.sound === 0 ? 1 : 0;
+        saveSettings();
+    }
+
+    // Info icon — bottom left corner
+    const infoX = 44, infoY = 472, infoR = 14;
+    const infoFrameP = 6;
+    const infoFrameSize = infoR + infoFrameP;
+    const infoHover = mouseInBox(infoX - infoFrameSize, infoY - infoFrameSize, infoFrameSize * 2, infoFrameSize * 2);
+
+    // Frame
+    ctx.fillStyle = infoHover ? 'rgba(78, 205, 196, 0.1)' : 'rgba(0, 0, 0, 0.3)';
+    ctx.fillRect(infoX - infoFrameSize, infoY - infoFrameSize, infoFrameSize * 2, infoFrameSize * 2);
+    ctx.fillStyle = infoHover ? '#4ecdc4' : '#555';
+    ctx.fillRect(infoX - infoFrameSize, infoY - infoFrameSize, infoFrameSize * 2, 1);
+    ctx.fillRect(infoX - infoFrameSize, infoY + infoFrameSize - 1, infoFrameSize * 2, 1);
+    ctx.fillRect(infoX - infoFrameSize, infoY - infoFrameSize, 1, infoFrameSize * 2);
+    ctx.fillRect(infoX + infoFrameSize - 1, infoY - infoFrameSize, 1, infoFrameSize * 2);
+
+    // "?" mark (pixel art)
+    const ic = infoHover ? '#4ecdc4' : '#888';
+    ctx.fillStyle = ic;
+    // Top curve of ?
+    ctx.fillRect(infoX - 4, infoY - 12, 8, 2);   // top bar
+    ctx.fillRect(infoX - 6, infoY - 10, 2, 4);    // left side
+    ctx.fillRect(infoX + 4, infoY - 10, 2, 4);    // right side
+    ctx.fillRect(infoX + 2, infoY - 6, 4, 2);     // curve inward
+    ctx.fillRect(infoX, infoY - 4, 4, 2);          // middle
+    ctx.fillRect(infoX - 2, infoY - 2, 4, 4);     // stem
+    // Dot
+    ctx.fillRect(infoX - 2, infoY + 4, 4, 4);
+
+    // Click to open How to Play
+    if (mouse.clicked && infoHover) {
+        showHowToPlay = true;
+        htpScroll = 0;
+    }
+
+    // Play button — centered
     const blink = Math.floor(Date.now() / 400) % 2;
     const promptY = legendY + legendH + 8;
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-    ctx.fillRect(150, promptY, 500, 44);
-    ctx.fillStyle = '#ffdd00';
-    ctx.fillRect(150, promptY, 500, 2);
-    ctx.fillRect(150, promptY + 42, 500, 2);
-    drawPixelText(T('pressEnter'), canvas.width / 2, promptY + 16, 16, blink ? '#ffdd00' : '#ffaa00');
-    drawPixelText(T('pressSpace'), canvas.width / 2, promptY + 34, 11, '#888');
+    const playHover = mouseInBox(200, promptY, 400, 44);
+
+    ctx.fillStyle = playHover ? 'rgba(255, 221, 0, 0.15)' : 'rgba(0, 0, 0, 0.5)';
+    ctx.fillRect(200, promptY, 400, 44);
+    ctx.fillStyle = (blink || playHover) ? '#ffdd00' : '#aa8800';
+    ctx.fillRect(200, promptY, 400, 2);
+    ctx.fillRect(200, promptY + 42, 400, 2);
+    ctx.fillRect(200, promptY, 2, 44);
+    ctx.fillRect(598, promptY, 2, 44);
+    drawPixelText(T('pressEnter'), canvas.width / 2, promptY + 26, 18, (blink || playHover) ? '#ffdd00' : '#ffaa00');
+
+    // Settings gear icon — top right corner with frame
+    const gearX = 756, gearY = 32, gearR = 14;
+    const frameP = 6; // padding around gear
+    const frameSize = gearR + frameP;
+    const gearHover = mouseInBox(gearX - frameSize, gearY - frameSize, frameSize * 2, frameSize * 2);
+
+    // Thin frame
+    ctx.fillStyle = gearHover ? 'rgba(78, 205, 196, 0.1)' : 'rgba(0, 0, 0, 0.3)';
+    ctx.fillRect(gearX - frameSize, gearY - frameSize, frameSize * 2, frameSize * 2);
+    ctx.fillStyle = gearHover ? '#4ecdc4' : '#555';
+    ctx.fillRect(gearX - frameSize, gearY - frameSize, frameSize * 2, 1);
+    ctx.fillRect(gearX - frameSize, gearY + frameSize - 1, frameSize * 2, 1);
+    ctx.fillRect(gearX - frameSize, gearY - frameSize, 1, frameSize * 2);
+    ctx.fillRect(gearX + frameSize - 1, gearY - frameSize, 1, frameSize * 2);
+
+    // Gear
+    ctx.save();
+    ctx.translate(gearX, gearY);
+    if (gearHover) ctx.rotate(Date.now() / 500);
+    const gearColor = gearHover ? '#4ecdc4' : '#888';
+    ctx.fillStyle = gearColor;
+    for (let t = 0; t < 8; t++) {
+        const angle = (t / 8) * Math.PI * 2;
+        const tx = Math.cos(angle) * 12;
+        const ty = Math.sin(angle) * 12;
+        ctx.fillRect(tx - 3, ty - 3, 6, 6);
+    }
+    ctx.beginPath();
+    ctx.arc(0, 0, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = gearHover ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.7)';
+    ctx.beginPath();
+    ctx.arc(0, 0, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // Mouse clicks
+    if (mouse.clicked) {
+        if (playHover) {
+            editingName = null;
+            customizeOpen = { p1: false, p2: false };
+            gameState = 'startmenu';
+            startMenuCursor = 0;
+            startMenuAdvanced = false;
+        } else if (gearHover) {
+            settingsReturnState = 'start';
+            settingsReturnPaused = false;
+            gameState = 'settings';
+            settingsCategory = 0;
+            settingsCursor = 0;
+        }
+    }
+
+    // Credits icon — bottom right corner
+    const credX = 756, credY = 472, credR = 14;
+    const credFrameP = 6;
+    const credFrameSize = credR + credFrameP;
+    const credHover = mouseInBox(credX - credFrameSize, credY - credFrameSize, credFrameSize * 2, credFrameSize * 2);
+
+    // Frame
+    ctx.fillStyle = credHover ? 'rgba(78, 205, 196, 0.1)' : 'rgba(0, 0, 0, 0.3)';
+    ctx.fillRect(credX - credFrameSize, credY - credFrameSize, credFrameSize * 2, credFrameSize * 2);
+    ctx.fillStyle = credHover ? '#4ecdc4' : '#555';
+    ctx.fillRect(credX - credFrameSize, credY - credFrameSize, credFrameSize * 2, 1);
+    ctx.fillRect(credX - credFrameSize, credY + credFrameSize - 1, credFrameSize * 2, 1);
+    ctx.fillRect(credX - credFrameSize, credY - credFrameSize, 1, credFrameSize * 2);
+    ctx.fillRect(credX + credFrameSize - 1, credY - credFrameSize, 1, credFrameSize * 2);
+
+    // "i" letter (pixel art)
+    const credIc = credHover ? '#4ecdc4' : '#888';
+    ctx.fillStyle = credIc;
+    ctx.fillRect(credX - 2, credY - 10, 4, 4);  // dot
+    ctx.fillRect(credX - 2, credY - 4, 4, 12);  // stem
+
+    // Click to open Credits
+    if (mouse.clicked && credHover) {
+        showCredits = true;
+        creditsStartTime = Date.now();
+        creditsScene = null; // re-init on open
+    }
+
+    // How to Play overlay (on start screen)
+    if (showHowToPlay) {
+        drawHowToPlay();
+    }
+
+    // Credits overlay (on start screen)
+    if (showCredits) {
+        drawCredits();
+    }
+}
+
+function drawStartMenu() {
+    drawBg();
+    drawPlatforms();
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // --- Tab buttons at top ---
+    const tabY = 30;
+    const tabW = 200;
+    const tabH = 32;
+    const tab1X = canvas.width / 2 - tabW - 10;
+    const tab2X = canvas.width / 2 + 10;
+    const tab1Hover = mouseInBox(tab1X, tabY, tabW, tabH);
+    const tab2Hover = mouseInBox(tab2X, tabY, tabW, tabH);
+    const tab1Active = !startMenuAdvanced;
+    const tab2Active = startMenuAdvanced;
+
+    // Tab 1: Main
+    ctx.fillStyle = tab1Active ? 'rgba(255, 221, 0, 0.2)' : (tab1Hover ? 'rgba(255, 221, 0, 0.08)' : 'rgba(0, 0, 0, 0.5)');
+    ctx.fillRect(tab1X, tabY, tabW, tabH);
+    ctx.fillStyle = tab1Active ? '#ffdd00' : (tab1Hover ? '#aa8800' : '#555');
+    ctx.fillRect(tab1X, tabY, tabW, 2); ctx.fillRect(tab1X, tabY + tabH - 2, tabW, 2);
+    ctx.fillRect(tab1X, tabY, 2, tabH); ctx.fillRect(tab1X + tabW - 2, tabY, 2, tabH);
+    drawPixelText(T('startMenu'), tab1X + tabW / 2, tabY + tabH / 2 + 4, 12, tab1Active ? '#ffdd00' : (tab1Hover ? '#ddd' : '#888'));
+
+    // Tab 2: Advanced
+    ctx.fillStyle = tab2Active ? 'rgba(233, 69, 96, 0.2)' : (tab2Hover ? 'rgba(233, 69, 96, 0.08)' : 'rgba(0, 0, 0, 0.5)');
+    ctx.fillRect(tab2X, tabY, tabW, tabH);
+    ctx.fillStyle = tab2Active ? '#e94560' : (tab2Hover ? '#aa3344' : '#555');
+    ctx.fillRect(tab2X, tabY, tabW, 2); ctx.fillRect(tab2X, tabY + tabH - 2, tabW, 2);
+    ctx.fillRect(tab2X, tabY, 2, tabH); ctx.fillRect(tab2X + tabW - 2, tabY, 2, tabH);
+    drawPixelText(T('advancedSettings'), tab2X + tabW / 2, tabY + tabH / 2 + 4, 12, tab2Active ? '#e94560' : (tab2Hover ? '#ddd' : '#888'));
+
+    // Mouse click on tabs
+    if (mouse.clicked) {
+        if (tab1Hover && startMenuAdvanced) {
+            startMenuAdvanced = false;
+            startMenuCursor = 0;
+            settingsScroll = 0;
+        } else if (tab2Hover && !startMenuAdvanced) {
+            startMenuAdvanced = true;
+            startMenuCursor = 0;
+            settingsScroll = 0;
+        }
+    }
+
+    if (startMenuAdvanced) {
+        // --- Advanced Settings Sub-screen ---
+        const advItems = getAdvancedSettingsItems();
+        const options = advItems.map(item => ({ label: item.label, value: item.value, hasArrows: item.hasArrows }));
+
+        // Use startMenuCursor for highlighting
+        const savedCursor = settingsCursor;
+        settingsCursor = startMenuCursor;
+        drawSettingsOptions(options, 78, true);
+        settingsCursor = savedCursor;
+
+        // Mouse interaction with advanced setting items
+        const advSpacing = 48;
+        const advBoxH = 36;
+        const maxVis = Math.floor((460 - 78) / advSpacing);
+        for (let vi = settingsScroll; vi < Math.min(advItems.length, settingsScroll + maxVis); vi++) {
+            const drawIdx = vi - settingsScroll;
+            const y = 78 + drawIdx * advSpacing;
+            if (mouseInBox(150, y, 500, advBoxH)) {
+                if (mouseMovedAfterScroll) startMenuCursor = vi;
+                if (mouse.clicked) {
+                    // Click left half = decrease, right half = increase
+                    if (mouse.x < 400) handleGameplaySettingChange(advItems[vi].key, -1);
+                    else handleGameplaySettingChange(advItems[vi].key, 1);
+                    saveSettings();
+                }
+            }
+        }
+
+        // Tooltip for selected advanced setting
+        if (advItems[startMenuCursor]) {
+            drawTooltip(advItems[startMenuCursor].key, 470);
+        }
+
+        const blink = Math.floor(Date.now() / 500) % 2;
+        drawPixelText(T('advancedHint'), canvas.width / 2, 486, 9, blink ? '#aaa' : '#666');
+    } else {
+        // --- Main Start Menu ---
+        const gm = settings.gameMode;
+        const modeVal = settings.lang === 0 ? GAME_MODE_OPTIONS[gm].name : GAME_MODE_OPTIONS[gm].nameDE;
+        const pvpVal = settings.mode === 0 ? T('pvp') : T('pve');
+        const boVal = T('bestOf') + BEST_OF_OPTIONS[settings.bestOf];
+        const avMaps = getAvailableMaps();
+        const mapIdx = Math.min(settings.map, avMaps.length - 1);
+        const mapVal = MAPS[avMaps[mapIdx]].name;
+
+        const menuItems = [
+            { label: T('lblGameMode'), value: modeVal, key: 'gameMode' },
+            { label: T('lblMode'), value: pvpVal, key: 'mode' },
+            { label: T('lblRounds'), value: boVal, key: 'bestOf' },
+            { label: T('lblMap'), value: mapVal, key: 'map' },
+        ];
+
+        const startY = 100;
+        const spacing = 60;
+        const boxH = 44;
+
+        for (let i = 0; i < menuItems.length; i++) {
+            const y = startY + i * spacing;
+            const hovered = mouseInBox(150, y, 500, boxH);
+            if (hovered && mouseMovedAfterScroll) startMenuCursor = i;
+            const selected = startMenuCursor === i;
+            const boxColor = selected ? '#ffdd00' : '#555';
+
+            // Box
+            ctx.fillStyle = selected ? 'rgba(255, 221, 0, 0.08)' : 'rgba(0, 0, 0, 0.5)';
+            ctx.fillRect(150, y, 500, boxH);
+            ctx.fillStyle = boxColor;
+            ctx.fillRect(150, y, 500, 2);
+            ctx.fillRect(150, y + boxH - 2, 500, 2);
+            ctx.fillRect(150, y, 2, boxH);
+            ctx.fillRect(648, y, 2, boxH);
+
+            // Label + value
+            drawPixelText(menuItems[i].label, 240, y + boxH / 2 + 4, 13, selected ? '#ffdd00' : '#888');
+            const midY = y + boxH / 2 + 4;
+            if (selected) {
+                const arrowBlink = Math.floor(Date.now() / 300) % 2;
+                drawPixelText('<', 370, midY, 16, arrowBlink ? '#ffdd00' : '#aa8800');
+                drawPixelText('>', 540, midY, 16, arrowBlink ? '#ffdd00' : '#aa8800');
+            }
+            drawPixelText(menuItems[i].value, 455, midY, 14, selected ? '#ffffff' : '#aaa');
+
+            // Mouse click on item
+            if (hovered && mouse.clicked) {
+                if (mouse.x < 400) handleGameplaySettingChange(menuItems[i].key, -1);
+                else handleGameplaySettingChange(menuItems[i].key, 1);
+                saveSettings();
+            }
+        }
+
+        // Tooltip for selected item
+        drawTooltip(menuItems[startMenuCursor].key, startY + menuItems.length * spacing + 10);
+
+        // Game mode description (only when game mode selected)
+        if (startMenuCursor === 0) {
+            const gmDesc = settings.lang === 0 ? GAME_MODE_OPTIONS[gm].desc : GAME_MODE_OPTIONS[gm].descDE;
+            drawPixelText(gmDesc, canvas.width / 2, startY + menuItems.length * spacing + 22, 9, '#aaa');
+        }
+
+        // Combined preview: background + buildings + platforms
+        const previewY = startY + menuItems.length * spacing + 22;
+        const pvW = 112, pvH = 70; // 800:500 = 8:5 ratio preserved
+        const pvX = (canvas.width - pvW) / 2;
+
+        // "Preview:" label
+        drawPixelText('Preview:', pvX - 42, previewY + pvH / 2 + 3, 9, '#888');
+
+        // Clip region
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(pvX, previewY, pvW, pvH);
+        ctx.clip();
+
+        // Background sky gradient
+        const theme = BG_THEMES[settings.bg];
+        const stripeH = pvH / theme.sky.length;
+        for (let si = 0; si < theme.sky.length; si++) {
+            ctx.fillStyle = theme.sky[si];
+            ctx.fillRect(pvX, previewY + si * stripeH, pvW, stripeH + 1);
+        }
+
+        // Uniform scale (same for X and Y)
+        const pvScale = pvW / 800; // = pvH / 500
+
+        // Mini buildings
+        const pvGroundY = previewY + pvH - 2;
+        ctx.fillStyle = theme.buildingColor;
+        for (const b of buildings) {
+            const bx = pvX + b.x * pvScale;
+            const bh = b.h * pvScale;
+            ctx.fillRect(bx, pvGroundY - bh, b.w * pvScale, bh);
+        }
+
+        // Platforms
+        let previewPlats;
+        if (settings.gameMode === 4) {
+            // Lava Rise: pick a random easy structure as preview
+            const struct = LAVA_STRUCTURES.easy[Math.floor((Date.now() / 3000) % LAVA_STRUCTURES.easy.length)];
+            previewPlats = [{ x: 50, y: 460, w: 700, h: 16 }];
+            for (const p of struct.platforms) {
+                previewPlats.push({ x: p.x, y: 300 + p.y, w: p.w, h: 16 });
+            }
+        } else {
+            previewPlats = MAPS[avMaps[mapIdx]].platforms;
+        }
+        for (const p of previewPlats) {
+            ctx.fillStyle = p.isGround ? '#8b6914' : '#9977cc';
+            const px = pvX + p.x * pvScale;
+            const py = previewY + p.y * pvScale;
+            ctx.fillRect(px, py, Math.max(p.w * pvScale, 2), Math.max((p.h || 16) * pvScale, 1));
+        }
+
+        ctx.restore();
+
+        // Frame
+        ctx.fillStyle = '#555';
+        ctx.fillRect(pvX, previewY, pvW, 1);
+        ctx.fillRect(pvX, previewY + pvH - 1, pvW, 1);
+        ctx.fillRect(pvX, previewY, 1, pvH);
+        ctx.fillRect(pvX + pvW - 1, previewY, 1, pvH);
+
+        // Start game button
+        const btnY = previewY + pvH + 8;
+        const btnHover = mouseInBox(200, btnY, 400, 44);
+        const blink = Math.floor(Date.now() / 400) % 2;
+        ctx.fillStyle = btnHover ? 'rgba(255, 221, 0, 0.15)' : 'rgba(0, 0, 0, 0.5)';
+        ctx.fillRect(200, btnY, 400, 44);
+        ctx.fillStyle = (blink || btnHover) ? '#ffdd00' : '#ffaa00';
+        ctx.fillRect(200, btnY, 400, 2);
+        ctx.fillRect(200, btnY + 42, 400, 2);
+        ctx.fillRect(200, btnY, 2, 44);
+        ctx.fillRect(598, btnY, 2, 44);
+        drawPixelText(T('startGame'), canvas.width / 2, btnY + 26, 16, (blink || btnHover) ? '#ffdd00' : '#ffaa00');
+
+        if (btnHover && mouse.clicked) {
+            gameMode = settings.mode === 0 ? 'pvp' : 'pve';
+            const avMaps = getAvailableMaps();
+            const mapIdx = Math.min(settings.map, avMaps.length - 1);
+            if (settings.gameMode !== 4) platforms = MAPS[avMaps[mapIdx]].platforms;
+            roundWins = { p1: 0, p2: 0 };
+            prerenderBackground();
+            resetGame();
+        }
+
+        // ESC hint
+    }
 }
 
 function drawSettingsScreen() {
@@ -4597,67 +5448,15 @@ function drawSettingsScreen() {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    if (settingsCategory === -1) {
-        // --- Category Selection ---
-        drawPixelText(T('settings'), canvas.width / 2, 60, 32, '#ffdd00');
-
-        const categories = [
-            { name: T('system'), icon: '\u2699', desc: T('sysDesc'), color: '#4ecdc4' },
-            { name: T('gameplay'), icon: '\u2694', desc: T('gpDesc'), color: '#e94560' },
-        ];
-
-        for (let i = 0; i < categories.length; i++) {
-            const cat = categories[i];
-            const bx = 120 + i * 290;
-            const by = 150;
-            const bw = 260;
-            const bh = 220;
-            const selected = settingsCursor === i;
-            const borderCol = selected ? cat.color : '#555';
-            const pulse = selected ? Math.sin(Date.now() / 200) * 0.15 + 0.85 : 0.5;
-
-            // Box background
-            ctx.fillStyle = selected ? `rgba(${i === 0 ? '78,205,196' : '233,69,96'}, 0.15)` : 'rgba(0, 0, 0, 0.5)';
-            ctx.fillRect(bx, by, bw, bh);
-            // Border
-            ctx.fillStyle = borderCol;
-            ctx.fillRect(bx, by, bw, 3);
-            ctx.fillRect(bx, by + bh - 3, bw, 3);
-            ctx.fillRect(bx, by, 3, bh);
-            ctx.fillRect(bx + bw - 3, by, 3, bh);
-
-            // Icon area
-            drawPixelText(cat.icon, bx + bw / 2, by + 60, 36, selected ? cat.color : '#666');
-            // Name
-            drawPixelText(cat.name, bx + bw / 2, by + 120, 20, selected ? '#ffffff' : '#888');
-            // Description
-            drawPixelText(cat.desc, bx + bw / 2, by + 160, 9, selected ? '#aaa' : '#555');
-
-            // Selection indicator
-            if (selected) {
-                const arrowBlink = Math.floor(Date.now() / 300) % 2;
-                drawPixelText('\u25B6', bx + bw / 2, by + 195, 14, arrowBlink ? cat.color : '#666');
-            }
-        }
-
-        const blink = Math.floor(Date.now() / 500) % 2;
-        drawPixelText(T('selectCat'), canvas.width / 2, 420, 10, blink ? '#aaa' : '#666');
-        drawPixelText(T('pressH'), canvas.width / 2, 440, 10, '#4ecdc4');
-
-    } else if (settingsCategory === 0) {
+    {
         // --- System Settings ---
-        drawPixelText(T('system'), canvas.width / 2, 60, 28, '#4ecdc4');
+        drawPixelText(T('settings'), canvas.width / 2, 60, 28, '#4ecdc4');
 
-        const soundVal = settings.sound === 0 ? T('on') : T('off');
         const skinLang = settings.lang === 0 ? 'name' : 'nameDE';
         const p1SkinName = SKIN_OPTIONS[settings.p1Skin][skinLang];
         const p2SkinName = SKIN_OPTIONS[settings.p2Skin][skinLang];
-        const avMaps = getAvailableMaps();
-        const mapIdx = Math.min(settings.map, avMaps.length - 1);
         const options = [
-            { label: T('lblMap'), value: MAPS[avMaps[mapIdx]].name, hasArrows: true },
             { label: T('lblBg'), value: BG_THEMES[settings.bg].name, hasArrows: true },
-            { label: T('lblSound'), value: soundVal, hasArrows: true },
             { label: T('lblLang'), value: LANG_OPTIONS[settings.lang], hasArrows: true },
             { label: T('lblP1Skin'), value: p1SkinName, hasArrows: true },
             { label: T('lblP2Skin'), value: p2SkinName, hasArrows: true },
@@ -4666,11 +5465,28 @@ function drawSettingsScreen() {
 
         drawSettingsOptions(options, 78);
 
-        // Skin color preview swatches next to P1/P2 COLOR options
+        // Mouse interaction with system settings
         const spacing = 48;
         const boxH = 36;
-        for (let si = 4; si <= 5; si++) {
-            const skinIdx = si === 4 ? settings.p1Skin : settings.p2Skin;
+        for (let si = 0; si < options.length; si++) {
+            const sy = 78 + si * spacing;
+            if (mouseInBox(150, sy, 500, boxH)) {
+                if (mouseMovedAfterScroll) settingsCursor = si;
+                if (mouse.clicked) {
+                    const dir = mouse.x < 400 ? -1 : 1;
+                    if (si === 0) { settings.bg = (settings.bg + dir + BG_THEMES.length) % BG_THEMES.length; prerenderBackground(); }
+                    else if (si === 1) settings.lang = (settings.lang + dir + LANG_OPTIONS.length) % LANG_OPTIONS.length;
+                    else if (si === 2) { settings.p1Skin = (settings.p1Skin + dir + SKIN_OPTIONS.length) % SKIN_OPTIONS.length; updateSkins(); }
+                    else if (si === 3) { settings.p2Skin = (settings.p2Skin + dir + SKIN_OPTIONS.length) % SKIN_OPTIONS.length; updateSkins(); }
+                    else if (si === 4) { gameState = 'rebind'; rebindPlayer = 1; rebindCursor = 0; rebindState = null; }
+                    saveSettings();
+                }
+            }
+        }
+
+        // Skin color preview swatches next to P1/P2 COLOR options
+        for (let si = 2; si <= 3; si++) {
+            const skinIdx = si === 2 ? settings.p1Skin : settings.p2Skin;
             const skin = SKIN_OPTIONS[skinIdx];
             const sy = 78 + si * spacing;
             const swX = 560;
@@ -4684,7 +5500,7 @@ function drawSettingsScreen() {
             ctx.fillRect(swX, sy + 4, 2, swS);
             ctx.fillRect(swX + swS - 2, sy + 4, 2, swS);
             // Mini sprite preview
-            const previewSprites = si === 4 ? sprites1 : sprites2;
+            const previewSprites = si === 2 ? sprites1 : sprites2;
             const previewFrame = previewSprites.idle[0];
             const miniScale = 1;
             const sprX = swX + swS + 8;
@@ -4692,59 +5508,9 @@ function drawSettingsScreen() {
             drawSprite(previewFrame, sprX, sprY, miniScale, false);
         }
 
-        // Map preview
-        const previewY = 78 + options.length * spacing + 8;
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-        ctx.fillRect(150, previewY, 500, 50);
-        ctx.fillStyle = '#444';
-        ctx.fillRect(150, previewY, 500, 2);
-        ctx.fillRect(150, previewY + 48, 500, 2);
-        drawPixelText(T('mapPreview'), canvas.width / 2, previewY + 11, 9, '#888');
-
-        const previewMap = MAPS[avMaps[mapIdx]].platforms;
-        const isLargeMap = previewMap.some(p => p.x + p.w > 850 || p.y + p.h > 500);
-        const scale = isLargeMap ? 0.07 : 0.09;
-        const offsetX = isLargeMap ? 220 : 210;
-        const offsetY = previewY - 22;
-        for (const p of previewMap) {
-            ctx.fillStyle = p.isGround ? '#8b6914' : '#7755aa';
-            ctx.fillRect(offsetX + p.x * scale, offsetY + p.y * scale, Math.max(p.w * scale, 4), Math.max(p.h * scale, 2));
-        }
-
-        // Background preview swatch
-        const theme = BG_THEMES[settings.bg];
-        const swatchX = 540;
-        const swatchW = 100;
-        for (let i = 0; i < theme.sky.length; i++) {
-            ctx.fillStyle = theme.sky[i];
-            ctx.fillRect(swatchX, previewY + 4 + i * 8, swatchW, 8);
-        }
-        ctx.fillStyle = '#444';
-        ctx.fillRect(swatchX, previewY + 2, swatchW, 2);
-        ctx.fillRect(swatchX, previewY + 44, swatchW, 2);
-        ctx.fillRect(swatchX, previewY + 2, 2, 44);
-        ctx.fillRect(swatchX + swatchW - 2, previewY + 2, 2, 44);
-
-        const blink = Math.floor(Date.now() / 500) % 2;
-        drawPixelText(T('arrowChange'), canvas.width / 2, 480, 9, blink ? '#aaa' : '#666');
-        drawPixelText(T('pressH'), canvas.width / 2, 496, 9, '#4ecdc4');
-
-    } else if (settingsCategory === 1) {
-        // --- Gameplay Settings (dynamic based on game mode) ---
-        drawPixelText(T('gameplay'), canvas.width / 2, 60, 28, '#e94560');
-
-        const gpItems = getGameplaySettingsItems();
-        const options = gpItems.map(item => ({ label: item.label, value: item.value, hasArrows: item.hasArrows }));
-
-        drawSettingsOptions(options, 78, true);
-
-        // Show game mode description
-        const gmDesc = settings.lang === 0 ? GAME_MODE_OPTIONS[settings.gameMode].desc : GAME_MODE_OPTIONS[settings.gameMode].descDE;
-        drawPixelText(gmDesc, canvas.width / 2, 470, 9, '#888');
-
-        const blink = Math.floor(Date.now() / 500) % 2;
-        drawPixelText(T('arrowChange'), canvas.width / 2, 486, 9, blink ? '#aaa' : '#666');
-        drawPixelText(T('pressH'), canvas.width / 2, 500, 9, '#4ecdc4');
+        // Tooltip for selected system setting
+        const sysKeys = ['bg', 'lang', 'p1Skin', 'p2Skin', 'controls'];
+        drawTooltip(sysKeys[settingsCursor], 78 + options.length * spacing + 8);
     }
 
     // How to Play overlay
@@ -4798,7 +5564,7 @@ function drawSettingsOptions(options, startY, useScroll) {
         drawPixelText(options[vi].value, 455, midY, 12, valColor);
     }
 
-    // Scroll indicators
+    // Scroll indicators + scrollbar
     if (useScroll && options.length > maxVisible) {
         const arrowPulse = Math.sin(Date.now() / 300) * 0.3 + 0.7;
         if (scrollOff > 0) {
@@ -4811,7 +5577,26 @@ function drawSettingsOptions(options, startY, useScroll) {
             drawPixelText('\u25BC', canvas.width / 2, startY + maxVisible * spacing + 4, 10, '#ffdd00');
             ctx.globalAlpha = 1;
         }
+
+        // Scrollbar
+        const maxScr = Math.max(0, options.length - maxVisible);
+        const trackH = maxVisible * spacing;
+        const sbId = 'opts-' + startY;
+        const newScroll = drawScrollbar(654, startY, trackH, settingsScroll, maxScr, sbId);
+        if (newScroll !== settingsScroll) {
+            settingsScroll = newScroll;
+            settingsCursor = Math.max(settingsScroll, Math.min(settingsScroll + maxVisible - 1, settingsCursor));
+        }
     }
+}
+
+// Draw a tooltip at the bottom of the screen for a given key
+function drawTooltip(tooltipKey, y) {
+    if (!tooltipKey) return;
+    const lang = settings.lang === 0 ? 'en' : 'de';
+    const text = TOOLTIPS[lang][tooltipKey];
+    if (!text) return;
+    drawPixelText(text, canvas.width / 2, y, 8, '#666');
 }
 
 function drawRebindScreen() {
@@ -4911,6 +5696,27 @@ function drawRebindScreen() {
             ctx.font = '9px monospace';
             ctx.textAlign = 'center';
             ctx.fillText(T('enterChange'), 470, y + 30);
+        }
+    }
+
+    // Mouse interaction: click player tabs
+    if (mouse.clicked && !rebindState) {
+        if (mouseInBox(150, 80, 240, 34)) rebindPlayer = 1;
+        else if (mouseInBox(410, 80, 240, 34)) rebindPlayer = 2;
+        // Click on action rows
+        for (let i = 0; i < KEY_ACTIONS.length; i++) {
+            const ry = 145 + i * 52;
+            if (mouseInBox(155, ry - 8, 490, 44)) {
+                rebindCursor = i;
+                rebindState = { player: rebindPlayer, action: KEY_ACTIONS[i] };
+            }
+        }
+    }
+    // Hover on action rows
+    if (!rebindState) {
+        for (let i = 0; i < KEY_ACTIONS.length; i++) {
+            const ry = 145 + i * 52;
+            if (mouseInBox(155, ry - 8, 490, 44) && mouseMovedAfterScroll) rebindCursor = i;
         }
     }
 
@@ -5014,6 +5820,7 @@ function drawHowToPlay() {
     ctx.fillText(T('puTitle'), x, y); y += lineH + 2;
 
     const puEntries = Object.entries(POWERUP_TYPES);
+    const totalWeight = puEntries.reduce((sum, [, p]) => sum + p.weight, 0);
     for (const [key, pu] of puEntries) {
         // Only draw if in visible range (optimization)
         if (y > boxTop - 20 && y < boxBottom + 20) {
@@ -5034,8 +5841,9 @@ function drawHowToPlay() {
             ctx.fillText(pu.name, x + 20, y);
             ctx.fillStyle = '#aaa';
             ctx.font = '11px monospace';
+            const prob = Math.round((pu.weight / totalWeight) * 100);
             const extra = pu.lavaOnly ? ' [Lava Rise]' : '';
-            ctx.fillText('- ' + pu.description + extra, x + 140, y);
+            ctx.fillText('- ' + pu.description + extra + '  (' + prob + '%)', x + 140, y);
         }
         y += lineH;
     }
@@ -5052,19 +5860,392 @@ function drawHowToPlay() {
         ctx.fillStyle = '#4ecdc4';
         ctx.font = 'bold 14px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText('▲', canvas.width / 2, boxTop + 14);
+        ctx.fillText('\u25b2', canvas.width / 2, boxTop + 14);
     }
     if (htpScroll < maxScroll) {
         ctx.fillStyle = '#4ecdc4';
         ctx.font = 'bold 14px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText('▼', canvas.width / 2, boxBottom - 6);
+        ctx.fillText('\u25bc', canvas.width / 2, boxBottom - 6);
     }
 
-    // Close hint (fixed at bottom)
-    const closeBlink = Math.floor(Date.now() / 500) % 2;
-    const scrollHint = settings.lang === 0 ? 'H/ESC close  |  ↑/↓ scroll' : 'H/ESC schließen  |  ↑/↓ scrollen';
-    drawPixelText(scrollHint, canvas.width / 2, 488, 12, closeBlink ? '#4ecdc4' : '#2a8a80');
+    // Scrollbar
+    htpScroll = drawScrollbar(boxX + boxW - 2, boxTop + 4, boxH - 8, htpScroll, maxScroll, 'htp');
+
+}
+
+function initCreditsScene() {
+    const swap = Math.random() < 0.5;
+    const cyanPal = SKIN_OPTIONS[0].palette;
+    const redPal = SKIN_OPTIONS[1].palette;
+    const spr1 = makeSprites(swap ? redPal : cyanPal);
+    const spr2 = makeSprites(swap ? cyanPal : redPal);
+    const col1 = swap ? '#e94560' : '#4ecdc4';
+    const col2 = swap ? '#4ecdc4' : '#e94560';
+    // Randomly choose winner (0 or 1)
+    const winner = Math.random() < 0.5 ? 0 : 1;
+
+    creditsScene = {
+        spr: [spr1, spr2],
+        col: [col1, col2],
+        players: [
+            { x: 200, y: 0, facingRight: true },
+            { x: 550, y: 0, facingRight: false },
+        ],
+        lastTick: Date.now(),
+    };
+}
+
+function updateCreditsScene(dt) {
+    // Nothing to update - players just stand still with idle bob
+}
+
+function drawCreditsSceneVisuals() {
+    const sc = creditsScene;
+    if (!sc) return;
+
+    const platY = 370;
+    const platW = 120;
+
+    // Draw players on platforms with idle bob
+    const bob = Math.sin(frameCount * 0.06) * 2;
+    for (let pi = 0; pi < 2; pi++) {
+        const p = sc.players[pi];
+        const spr = sc.spr[pi];
+        const flipX = !p.facingRight;
+        const playerBob = pi === 0 ? bob : -bob;
+        const py = platY - 40 + playerBob;
+
+        drawSprite(spr.idle[0], p.x, py, PX, flipX);
+        // Gun
+        const gunOffX = p.facingRight ? 22 : -10;
+        drawSprite(spr.gun, p.x + gunOffX, py + 14, PX, flipX);
+
+        // Platform under each player
+        ctx.fillStyle = '#556';
+        ctx.fillRect(p.x - 20, platY, platW, 8);
+        ctx.fillStyle = '#778';
+        ctx.fillRect(p.x - 20, platY, platW, 2);
+    }
+}
+
+function drawCredits() {
+    // Initialize scene on first call
+    if (!creditsScene) initCreditsScene();
+
+    // Update scene physics
+    const now = Date.now();
+    const dt = Math.min((now - creditsScene.lastTick) / 1000, 0.05);
+    creditsScene.lastTick = now;
+    updateCreditsScene(dt);
+
+    // Background (actual game background)
+    drawBg();
+
+    // Darken overlay for readability
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Draw the characters on platforms
+    drawCreditsSceneVisuals();
+
+    // Scrolling credits text
+    const elapsed = (Date.now() - creditsStartTime) / 1000;
+    const scrollSpeed = 30;
+    const scrollY = elapsed * scrollSpeed;
+
+    const credits = [
+        ['spacer', 80],
+        ['title', 'SHOOOTER 2D'],
+        ['spacer', 15],
+        ['subtitle', 'A 2D Local Multiplayer Pixel Shooter'],
+        ['spacer', 60],
+        ['role', 'Developed by'],
+        ['spacer', 8],
+        ['name', 'Aurel Schenkl'],
+        ['name', 'Claude by Anthropic'],
+        ['spacer', 50],
+        ['role', 'Game Design by'],
+        ['spacer', 8],
+        ['name', 'Aurel Schenkl'],
+        ['name', 'Claude by Anthropic'],
+        ['spacer', 50],
+        ['role', 'Art & Animation by'],
+        ['spacer', 8],
+        ['name', 'Claude by Anthropic'],
+        ['spacer', 50],
+        ['role', 'UI / UX Design by'],
+        ['spacer', 8],
+        ['name', 'Aurel Schenkl'],
+        ['name', 'Claude by Anthropic'],
+        ['spacer', 50],
+        ['role', 'AI Programming by'],
+        ['spacer', 8],
+        ['name', 'Claude by Anthropic'],
+        ['spacer', 50],
+        ['role', 'Sound by'],
+        ['spacer', 8],
+        ['name', 'Claude by Anthropic'],
+        ['spacer', 50],
+        ['role', 'Quality Assurance by'],
+        ['spacer', 8],
+        ['name', 'Aurel Schenkl'],
+        ['spacer', 80],
+        ['role', 'Powered by'],
+        ['spacer', 8],
+        ['name', 'HTML5 Canvas'],
+        ['name', 'JavaScript'],
+        ['spacer', 80],
+        ['role', 'Special Thanks to'],
+        ['spacer', 8],
+        ['name', 'Anthropic'],
+        ['spacer', 120],
+        ['title', 'Thank you for playing!'],
+        ['spacer', 200],
+    ];
+
+    let curY = canvas.height + 20 - scrollY;
+    ctx.textAlign = 'center';
+
+    for (const entry of credits) {
+        if (entry[0] === 'spacer') { curY += entry[1]; continue; }
+        if (curY > -30 && curY < canvas.height + 30) {
+            if (entry[0] === 'title') { drawPixelText(entry[1], canvas.width / 2, curY, 28, '#ffdd00'); curY += 36; }
+            else if (entry[0] === 'subtitle') { ctx.font = '12px monospace'; ctx.fillStyle = '#888'; ctx.fillText(entry[1], canvas.width / 2, curY); curY += 20; }
+            else if (entry[0] === 'role') { drawPixelText(entry[1], canvas.width / 2, curY, 16, '#4ecdc4'); curY += 24; }
+            else if (entry[0] === 'name') { ctx.font = '14px monospace'; ctx.fillStyle = '#ddd'; ctx.fillText(entry[1], canvas.width / 2, curY); curY += 22; }
+        } else {
+            if (entry[0] === 'title') curY += 36;
+            else if (entry[0] === 'subtitle') curY += 20;
+            else if (entry[0] === 'role') curY += 24;
+            else if (entry[0] === 'name') curY += 22;
+        }
+    }
+
+    let totalH = 0;
+    for (const entry of credits) {
+        if (entry[0] === 'spacer') totalH += entry[1];
+        else if (entry[0] === 'title') totalH += 36;
+        else if (entry[0] === 'subtitle') totalH += 20;
+        else if (entry[0] === 'role') totalH += 24;
+        else if (entry[0] === 'name') totalH += 22;
+    }
+
+    if (scrollY > totalH) {
+        showCredits = false;
+        creditsScene = null;
+    }
+
+    if (mouse.clicked && Date.now() - creditsStartTime > 300) {
+        showCredits = false;
+        creditsScene = null;
+    }
+}
+
+function drawPauseMenu() {
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Title
+    drawPixelText(settings.lang === 0 ? 'GAME PAUSED' : 'SPIEL PAUSIERT', canvas.width / 2, 120, 28, '#ffdd00');
+
+    const items = [
+        { label: settings.lang === 0 ? 'RESUME' : 'FORTSETZEN', type: 'button' },
+        { label: settings.lang === 0 ? 'SOUND' : 'TON', type: 'sound' },
+        { label: settings.lang === 0 ? 'SETTINGS' : 'EINSTELLUNGEN', type: 'button' },
+        { label: settings.lang === 0 ? 'BACK TO HOME' : 'ZURUCK ZUM HOME-BILDSCHIRM', type: 'button' },
+    ];
+
+    const startY = 180;
+    const spacing = 56;
+    const boxW = 400;
+    const boxH = 40;
+    const boxX = (canvas.width - boxW) / 2;
+
+    for (let i = 0; i < items.length; i++) {
+        const y = startY + i * spacing;
+        const selected = pauseCursor === i;
+        const hover = mouseInBox(boxX, y, boxW, boxH);
+        if (hover && mouseMovedAfterScroll) pauseCursor = i;
+
+        // Box background
+        ctx.fillStyle = selected ? 'rgba(255, 221, 0, 0.1)' : 'rgba(0, 0, 0, 0.5)';
+        ctx.fillRect(boxX, y, boxW, boxH);
+        // Border
+        const borderCol = selected ? '#ffdd00' : '#555';
+        ctx.fillStyle = borderCol;
+        ctx.fillRect(boxX, y, boxW, 2);
+        ctx.fillRect(boxX, y + boxH - 2, boxW, 2);
+        ctx.fillRect(boxX, y, 2, boxH);
+        ctx.fillRect(boxX + boxW - 2, y, 2, boxH);
+
+        if (items[i].type === 'sound') {
+            const soundOn = settings.sound === 0;
+            const vol = settings.volume; // 0-10
+
+            // Label
+            drawPixelText(items[i].label, boxX + 60, y + boxH / 2 + 4, 14, selected ? '#ffdd00' : '#888');
+
+            // Mute button
+            const muteX = boxX + 110;
+            const muteY = y + boxH / 2;
+            const muteCol = soundOn ? '#4ecdc4' : '#e94560';
+            ctx.fillStyle = muteCol;
+            ctx.fillRect(muteX - 6, muteY - 3, 5, 6);
+            ctx.fillRect(muteX - 1, muteY - 6, 3, 12);
+            if (soundOn) {
+                ctx.fillRect(muteX + 4, muteY - 2, 2, 4);
+                ctx.fillRect(muteX + 8, muteY - 4, 2, 8);
+            }
+
+            // Click on mute icon area
+            if (mouse.clicked && mouseInBox(muteX - 10, y, 30, boxH)) {
+                settings.sound = settings.sound === 0 ? 1 : 0;
+                saveSettings();
+            }
+
+            // Volume slider
+            const sliderX = boxX + 150;
+            const sliderW = 180;
+            const sliderY = y + boxH / 2;
+
+            // Track background
+            ctx.fillStyle = '#333';
+            ctx.fillRect(sliderX, sliderY - 2, sliderW, 4);
+
+            // Filled portion
+            const fillW = (vol / 10) * sliderW;
+            ctx.fillStyle = soundOn ? '#4ecdc4' : '#666';
+            ctx.fillRect(sliderX, sliderY - 2, fillW, 4);
+
+            // Notches
+            for (let n = 0; n <= 10; n++) {
+                const nx = sliderX + (n / 10) * sliderW;
+                ctx.fillStyle = n <= vol ? (soundOn ? '#4ecdc4' : '#666') : '#444';
+                ctx.fillRect(nx - 1, sliderY - 4, 2, 8);
+            }
+
+            // Thumb
+            const thumbX = sliderX + fillW;
+            ctx.fillStyle = selected ? '#ffdd00' : '#aaa';
+            ctx.fillRect(thumbX - 3, sliderY - 6, 6, 12);
+
+            // Volume percentage text
+            const volText = (vol * 10) + '%';
+            drawPixelText(volText, sliderX + sliderW + 35, y + boxH / 2 + 4, 12, selected ? '#fff' : '#aaa');
+
+            // Click on slider to set volume
+            if (mouse.clicked && mouseInBox(sliderX - 5, y, sliderW + 10, boxH)) {
+                const clickVol = Math.round(((mouse.x - sliderX) / sliderW) * 10);
+                settings.volume = Math.max(0, Math.min(10, clickVol));
+                if (settings.volume === 0) settings.sound = 1; else settings.sound = 0;
+                saveSettings();
+            }
+
+            // Arrows for keyboard control
+            if (selected) {
+                const arrowBlink = Math.floor(Date.now() / 300) % 2;
+                drawPixelText('<', sliderX - 16, y + boxH / 2 + 4, 12, arrowBlink ? '#ffdd00' : '#aa8800');
+                drawPixelText('>', sliderX + sliderW + 60, y + boxH / 2 + 4, 12, arrowBlink ? '#ffdd00' : '#aa8800');
+            }
+        } else {
+            // Regular button
+            const labelCol = (i === 3 && selected) ? '#e94560' : (selected ? '#ffdd00' : '#888');
+            drawPixelText(items[i].label, canvas.width / 2, y + boxH / 2 + 4, 14, labelCol);
+
+            // Click handling
+            if (mouse.clicked && hover) {
+                if (i === 0) {
+                    gamePaused = false; // Resume
+                } else if (i === 2) {
+                    // Settings
+                    settingsReturnState = gameState;
+                    settingsReturnPaused = true;
+                    gamePaused = false;
+                    gameState = 'settings';
+                    settingsCategory = 0;
+                    settingsCursor = 0;
+                } else if (i === 3) {
+                    pauseConfirm = true; // Show confirmation dialog
+                }
+            }
+        }
+    }
+
+    // Confirmation dialog overlay
+    if (pauseConfirm) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const dlgW = 360;
+        const dlgH = 140;
+        const dlgX = (canvas.width - dlgW) / 2;
+        const dlgY = (canvas.height - dlgH) / 2;
+
+        // Dialog box
+        ctx.fillStyle = 'rgba(20, 20, 40, 0.95)';
+        ctx.fillRect(dlgX, dlgY, dlgW, dlgH);
+        ctx.fillStyle = '#e94560';
+        ctx.fillRect(dlgX, dlgY, dlgW, 2);
+        ctx.fillRect(dlgX, dlgY + dlgH - 2, dlgW, 2);
+        ctx.fillRect(dlgX, dlgY, 2, dlgH);
+        ctx.fillRect(dlgX + dlgW - 2, dlgY, 2, dlgH);
+
+        // Question text
+        const qText = settings.lang === 0 ? 'Leave the game?' : 'Spiel verlassen?';
+        drawPixelText(qText, canvas.width / 2, dlgY + 40, 16, '#fff');
+        const subText = settings.lang === 0 ? 'Progress will be lost' : 'Fortschritt geht verloren';
+        drawPixelText(subText, canvas.width / 2, dlgY + 60, 9, '#888');
+
+        // Yes / No buttons
+        const btnW = 120;
+        const btnH = 32;
+        const btnY = dlgY + dlgH - btnH - 18;
+        const yesX = canvas.width / 2 - btnW - 10;
+        const noX = canvas.width / 2 + 10;
+
+        const yesHover = mouseInBox(yesX, btnY, btnW, btnH);
+        const noHover = mouseInBox(noX, btnY, btnW, btnH);
+
+        // Yes button
+        ctx.fillStyle = yesHover ? 'rgba(233, 69, 96, 0.3)' : 'rgba(0, 0, 0, 0.5)';
+        ctx.fillRect(yesX, btnY, btnW, btnH);
+        ctx.fillStyle = yesHover ? '#e94560' : '#666';
+        ctx.fillRect(yesX, btnY, btnW, 2); ctx.fillRect(yesX, btnY + btnH - 2, btnW, 2);
+        ctx.fillRect(yesX, btnY, 2, btnH); ctx.fillRect(yesX + btnW - 2, btnY, 2, btnH);
+        drawPixelText(settings.lang === 0 ? 'YES' : 'JA', yesX + btnW / 2, btnY + btnH / 2 + 4, 14, yesHover ? '#e94560' : '#888');
+
+        // No button
+        ctx.fillStyle = noHover ? 'rgba(78, 205, 196, 0.3)' : 'rgba(0, 0, 0, 0.5)';
+        ctx.fillRect(noX, btnY, btnW, btnH);
+        ctx.fillStyle = noHover ? '#4ecdc4' : '#666';
+        ctx.fillRect(noX, btnY, btnW, 2); ctx.fillRect(noX, btnY + btnH - 2, btnW, 2);
+        ctx.fillRect(noX, btnY, 2, btnH); ctx.fillRect(noX + btnW - 2, btnY, 2, btnH);
+        drawPixelText(settings.lang === 0 ? 'NO' : 'NEIN', noX + btnW / 2, btnY + btnH / 2 + 4, 14, noHover ? '#4ecdc4' : '#888');
+
+        // Click handling
+        if (mouse.clicked) {
+            if (yesHover) {
+                pauseConfirm = false;
+                gamePaused = false;
+                AI.reset();
+                if (player2) {
+                    const c = player2.controls;
+                    keys[c.left] = false;
+                    keys[c.right] = false;
+                    keys[c.jump] = false;
+                    keys[c.shoot] = false;
+                    keys[c.down] = false;
+                }
+                gameMode = null;
+                roundWins = { p1: 0, p2: 0 };
+                gameState = 'start';
+            } else if (noHover) {
+                pauseConfirm = false;
+            }
+        }
+    }
 }
 
 function drawGameOverScreen() {
@@ -6314,9 +7495,12 @@ function resetGame() {
     ammoPickups = [];
     lastAmmoSpawn = Date.now();
     gameState = 'playing';
+    gamePaused = false;
+    pauseConfirm = false;
     winner = null;
     loser = null;
     deathTimer = 0;
+    countdownTimer = 240; // 4 seconds: 3, 2, 1, GO!
     stats = {
         p1: { shotsFired: 0, hits: 0, damageDone: 0, powerupsCollected: 0, deaths: 0 },
         p2: { shotsFired: 0, hits: 0, damageDone: 0, powerupsCollected: 0, deaths: 0 },
@@ -6399,6 +7583,171 @@ function updateSuddenDeath() {
     }
 }
 
+// --- Kill Feed ---
+function drawKillFeed() {
+    const now = Date.now();
+    // Remove old entries (older than 4 seconds)
+    killFeed = killFeed.filter(e => now - e.time < 4000);
+    if (killFeed.length === 0) return;
+
+    const feedStartY = 45;
+    const lineH = 18;
+
+    for (let i = 0; i < Math.min(killFeed.length, 3); i++) {
+        const entry = killFeed[killFeed.length - 1 - i];
+        const age = now - entry.time;
+        const alpha = age > 3000 ? 1 - (age - 3000) / 1000 : 1;
+
+        const text = entry.killer + ' \u2192 ' + entry.victim;
+        const textW = text.length * 7;
+        const bgX = canvas.width / 2 - textW / 2 - 7;
+        ctx.globalAlpha = alpha * 0.6;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.fillRect(bgX, feedStartY + i * lineH - 6, textW + 14, lineH);
+        ctx.globalAlpha = alpha;
+
+        const y = feedStartY + i * lineH + 4;
+        const arrowStr = ' \u2192 ';
+        const killerW = entry.killer.length * 7;
+        const arrowW = arrowStr.length * 7;
+        const victimW = entry.victim.length * 7;
+        const totalW = killerW + arrowW + victimW;
+        const startX = canvas.width / 2 - totalW / 2;
+        drawPixelText(entry.killer, startX + killerW / 2, y, 8, entry.killerColor);
+        drawPixelText(arrowStr, startX + killerW + arrowW / 2, y, 8, '#aaa');
+        drawPixelText(entry.victim, startX + killerW + arrowW + victimW / 2, y, 8, entry.victimColor);
+        ctx.globalAlpha = 1;
+    }
+}
+
+// --- Active Power-Up HUD (top corners) ---
+function drawPowerupHud() {
+    const now = Date.now();
+    const iconSize = 14;
+    const iconSpacing = 18;
+    // Position below KOTH/Tag/Lava HUD bars
+    const hudY = (settings.gameMode === 2 || settings.gameMode === 3) ? 40 : (settings.gameMode === 4 ? 42 : 20);
+
+    // Helper: draw PU icons for a player
+    function drawPlayerPuIcons(player, startX, direction) {
+        let idx = 0;
+
+        // Timed power-ups (active with timer)
+        for (const [type, expiry] of Object.entries(player.activePowerups)) {
+            if (now >= expiry) continue;
+            const def = POWERUP_TYPES[type];
+            const remaining = expiry - now;
+            const total = def.duration;
+            const ratio = remaining / total;
+            const x = startX + direction * idx * iconSpacing;
+
+            // Icon background
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            ctx.fillRect(x - iconSize / 2, hudY - iconSize / 2, iconSize, iconSize);
+
+            // Timer fill (bottom-up)
+            ctx.fillStyle = def.color;
+            ctx.globalAlpha = 0.3;
+            ctx.fillRect(x - iconSize / 2, hudY - iconSize / 2 + iconSize * (1 - ratio), iconSize, iconSize * ratio);
+            ctx.globalAlpha = 1;
+
+            // Border
+            ctx.fillStyle = def.color;
+            ctx.fillRect(x - iconSize / 2, hudY - iconSize / 2, iconSize, 1);
+            ctx.fillRect(x - iconSize / 2, hudY + iconSize / 2 - 1, iconSize, 1);
+            ctx.fillRect(x - iconSize / 2, hudY - iconSize / 2, 1, iconSize);
+            ctx.fillRect(x + iconSize / 2 - 1, hudY - iconSize / 2, 1, iconSize);
+
+            // Symbol
+            drawPixelText(def.symbol, x, hudY + 3, 8, def.color);
+            idx++;
+        }
+
+        // Inventory power-ups (charges)
+        const inventoryItems = [];
+        if (player.doubleJumps > 0) inventoryItems.push({ type: 'doublejump', count: player.doubleJumps });
+        if (player.swapCharges > 0) inventoryItems.push({ type: 'swap', count: player.swapCharges });
+        if (player.platformCharges > 0) inventoryItems.push({ type: 'platspawn', count: player.platformCharges });
+
+        for (const item of inventoryItems) {
+            const def = POWERUP_TYPES[item.type];
+            const x = startX + direction * idx * iconSpacing;
+
+            // Icon background
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            ctx.fillRect(x - iconSize / 2, hudY - iconSize / 2, iconSize, iconSize);
+
+            // Full fill (permanent until used)
+            ctx.fillStyle = def.color;
+            ctx.globalAlpha = 0.3;
+            ctx.fillRect(x - iconSize / 2, hudY - iconSize / 2, iconSize, iconSize);
+            ctx.globalAlpha = 1;
+
+            // Border
+            ctx.fillStyle = def.color;
+            ctx.fillRect(x - iconSize / 2, hudY - iconSize / 2, iconSize, 1);
+            ctx.fillRect(x - iconSize / 2, hudY + iconSize / 2 - 1, iconSize, 1);
+            ctx.fillRect(x - iconSize / 2, hudY - iconSize / 2, 1, iconSize);
+            ctx.fillRect(x + iconSize / 2 - 1, hudY - iconSize / 2, 1, iconSize);
+
+            // Symbol
+            drawPixelText(def.symbol, x, hudY + 3, 8, def.color);
+
+            // Count badge
+            if (item.count > 1) {
+                const badgeX = x + iconSize / 2 - 2;
+                const badgeY = hudY - iconSize / 2;
+                ctx.fillStyle = '#000';
+                ctx.fillRect(badgeX - 3, badgeY - 1, 8, 8);
+                drawPixelText('' + item.count, badgeX + 1, badgeY + 6, 6, '#fff');
+            }
+            idx++;
+        }
+    }
+
+    // P1: top left, expanding rightward
+    drawPlayerPuIcons(player1, 20, 1);
+    // P2: top right, expanding leftward
+    drawPlayerPuIcons(player2, canvas.width - 20, -1);
+}
+
+// --- Round Display ---
+function drawRoundDisplay() {
+    const totalRounds = BEST_OF_OPTIONS[settings.bestOf];
+    if (totalRounds <= 1) return;
+
+    const currentRound = roundWins.p1 + roundWins.p2 + 1;
+    const text = (settings.lang === 0 ? 'Round ' : 'Runde ') + currentRound + '/' + totalRounds;
+    drawPixelText(text, canvas.width / 2, 14, 9, 'rgba(255, 255, 255, 0.6)');
+}
+
+// --- Countdown ---
+function drawCountdown() {
+    if (countdownTimer <= 0) return;
+
+    const phase = Math.ceil(countdownTimer / 60); // 60fps: 3=180-121, 2=120-61, 1=60-1
+    const frameInPhase = countdownTimer % 60;
+    const scale = 1 + (frameInPhase / 60) * 0.5; // shrink effect
+
+    let text, color;
+    if (countdownTimer > 180) {
+        text = '3'; color = '#ff4444';
+    } else if (countdownTimer > 120) {
+        text = '2'; color = '#ffaa00';
+    } else if (countdownTimer > 60) {
+        text = '1'; color = '#ffdd00';
+    } else {
+        text = 'FIGHT!'; color = '#44ff44';
+    }
+
+    const size = Math.floor(48 * scale);
+    ctx.globalAlpha = Math.min(1, countdownTimer / 10);
+    drawPixelText(text, canvas.width / 2, canvas.height / 2, size, color);
+    ctx.globalAlpha = 1;
+
+    countdownTimer--;
+}
+
 function drawRoundTimer() {
     const sdOption = SUDDEN_DEATH_OPTIONS[settings.suddenDeath];
     if (sdOption.time === 0) return;
@@ -6423,25 +7772,29 @@ function gameLoop() {
 
     if (gameState === 'start') {
         drawStartScreen();
+    } else if (gameState === 'startmenu') {
+        drawStartMenu();
     } else if (gameState === 'settings') {
         drawSettingsScreen();
     } else if (gameState === 'rebind') {
         drawRebindScreen();
     } else if (gameState === 'playing') {
-        if (gameMode === 'pve') {
-            AI.update(player2, player1);
+        if (!gamePaused && countdownTimer <= 0) {
+            if (gameMode === 'pve') {
+                AI.update(player2, player1);
+            }
+            player1.update();
+            player2.update();
+            updatePowerups();
+            updateAmmoPickups();
+            if (settings.gameMode === 0 || settings.gameMode === 1) updateSuddenDeath();
+            if (settings.gameMode === 2) updateKOTH();
+            if (settings.gameMode === 4) updateLavaMode();
+            checkBulletHits();
+            checkWin();
+            updateParticles();
+            updateDamageNumbers();
         }
-        player1.update();
-        player2.update();
-        updatePowerups();
-        updateAmmoPickups();
-        if (settings.gameMode === 0 || settings.gameMode === 1) updateSuddenDeath();
-        if (settings.gameMode === 2) updateKOTH();
-        if (settings.gameMode === 4) updateLavaMode();
-        checkBulletHits();
-        checkWin();
-        updateParticles();
-        updateDamageNumbers();
 
         drawBg();
         if (settings.gameMode === 4) {
@@ -6449,7 +7802,7 @@ function gameLoop() {
             ctx.translate(0, lavaState.cameraY);
         }
         drawPlatforms();
-        if (settings.gameMode === 2) drawKOTHHud(); // draw hill zone before players
+        if (settings.gameMode === 2) drawKOTHHud();
         drawPowerups();
         drawAmmoPickups();
         player1.draw();
@@ -6464,10 +7817,17 @@ function gameLoop() {
         }
         if (settings.gameMode === 0 || settings.gameMode === 1) drawRoundTimer();
         if (settings.gameMode === 3) drawTagHud();
+        drawRoundDisplay();
+        drawPowerupHud();
+        drawKillFeed();
+        drawCountdown();
+        if (gamePaused) drawPauseMenu();
     } else if (gameState === 'dying') {
-        updateDeathAnimation();
-        updateParticles();
-        updateDamageNumbers();
+        if (!gamePaused) {
+            updateDeathAnimation();
+            updateParticles();
+            updateDamageNumbers();
+        }
 
         drawBg();
         if (settings.gameMode === 4) {
@@ -6487,6 +7847,9 @@ function gameLoop() {
             ctx.restore();
             drawLavaHud();
         }
+        drawPowerupHud();
+        drawKillFeed();
+        if (gamePaused) drawPauseMenu();
     } else if (gameState === 'gameover') {
         drawBg();
         if (settings.gameMode === 4) {
@@ -6516,8 +7879,10 @@ function gameLoop() {
             ctx.restore();
         }
         drawGameOverScreen();
+        if (gamePaused) drawPauseMenu();
     }
 
+    mouse.clicked = false; // consume click each frame
     requestAnimationFrame(gameLoop);
 }
 
